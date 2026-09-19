@@ -1,0 +1,182 @@
+/* ===== 오답노트 전용 (토큰·버튼은 base.css, 상단바·사이드바는 shell.css) ===== */
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+/* ===== 제목 ===== */
+.notes__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.notes__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+}
+.notes__mark {
+  display: grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  flex: none;
+  border-radius: 8px;
+  background: #fdeeee;
+  color: var(--red);
+}
+.notes__mark svg { width: 16px; height: 16px; stroke-width: 1.9; }
+
+.notes__sub {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* ===== 과목 필터 ===== */
+.notes__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.notes__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.filter {
+  padding: 6px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.filter:hover { border-color: var(--primary); color: var(--primary); }
+.filter.is-active {
+  border-color: var(--topbar);
+  background: var(--topbar);
+  color: #fff;
+}
+
+/* ===== 오답 목록 ===== */
+.notes__list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.note {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.note__tag {
+  display: grid;
+  place-items: center;
+  padding: 5px 0;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.note__tag--korean   { background: #ffe6d0; color: #b45309; }
+.note__tag--english  { background: #fff3cd; color: #9a6b00; }
+.note__tag--history  { background: var(--primary-soft); color: var(--primary-dark); }
+.note__tag--adminlaw { background: #eeeaff; color: #5637dd; }
+.note__tag--adminsci { background: var(--green-soft); color: #0d7a4d; }
+.note__tag--etc      { background: #eef0f5; color: var(--text-soft); }
+
+.note__body { min-width: 0; }
+.note__topic {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.note__q {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.note__date {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.note__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.note__delete {
+  border-color: #f0c8c8;
+  color: var(--red);
+}
+.note__delete:hover {
+  border-color: var(--red);
+  background: #fdeeee;
+  color: var(--red);
+}
+
+/* ===== 빈 상태 ===== */
+.notes__empty {
+  padding: 40px 20px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* ===== 반응형 ===== */
+@media (max-width: 760px) {
+  /* 과목 배지와 문제를 위, 날짜와 버튼을 아래로 */
+  .note {
+    grid-template-columns: 60px minmax(0, 1fr);
+    row-gap: 9px;
+  }
+  .note__actions { grid-column: 1 / -1; }
+  .note__actions .btn { flex: 1; }
+}
+
+@media (max-width: 420px) {
+  .notes__bar { flex-direction: column; align-items: stretch; }
+  .notes__bar .btn { width: 100%; }
+}

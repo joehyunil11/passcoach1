@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="js/boot.js"></script>
+<script src="js/data.js"></script>
+<script src="js/shell.js"></script>
+<title>나의 약점 분석 · 공무원 AI</title>
+<meta name="theme-color" content="#2563eb" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
+<style>
+  @view-transition{navigation:auto}
+  html,body{height:100%;margin:0}
+  body:has(.layout){overflow:hidden}
+  .topbar{position:fixed;top:0;left:0;right:0;height:52px;z-index:40;view-transition-name:shell-topbar}
+  .layout{display:grid;grid-template-columns:252px minmax(0,1fr);width:100%;height:calc(100% - 52px);margin-top:52px;overflow:hidden}
+  .sidebar{width:252px;min-width:252px;max-width:252px;view-transition-name:shell-sidebar}
+  .main{height:100%;min-width:0;overflow-x:hidden;overflow-y:scroll;scrollbar-gutter:stable}
+</style>
+<link rel="stylesheet" href="css/base.css" />
+<link rel="stylesheet" href="css/shell.css" />
+<link rel="stylesheet" href="css/record.css" />
+<link rel="stylesheet" href="css/weakness.css" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" /></noscript>
+</head>
+<body data-active-nav="weakness">
+<a class="skip-link" href="#weakness">약점 분석으로 건너뛰기</a>
+
+<header class="topbar">
+  <button class="topbar__menu" type="button" id="sidebarToggle" aria-label="메뉴 열기" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+  </button>
+  <span class="topbar__dot" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.4" /><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" /></svg>
+  </span>
+  <h1 class="topbar__title">나의 약점 분석</h1>
+  <div class="topbar__spacer"></div>
+  <div class="topbar__auth" id="topbarAuth"></div>
+  <button class="topbar__icon" type="button" data-action="알림" aria-label="알림">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V10a6 6 0 1 1 12 0v6l1.5 2.5H4.5L6 16Z" /><path d="M10 19.5a2 2 0 0 0 4 0" /></svg>
+    <span class="topbar__badge">3</span>
+  </button>
+</header>
+
+<div class="layout">
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="sidebar" id="sidebar" aria-label="주요 메뉴">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M2.5 8.5 12 4.5l9.5 4-9.5 4-9.5-4Z" /><path d="M6.5 11v5.2c0 1.3 2.5 2.3 5.5 2.3s5.5-1 5.5-2.3V11" /><path d="M20.5 9.6v5.1" /></svg>
+      </span>
+      <div class="brand__copy">
+        <span class="brand__text"><b>AI</b> 9급 공무원 합격 코치</span>
+        <p class="brand__sub">내가 틀리는 문제만 찾아서<br />가르쳐주는 AI 공무원 선생님</p>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="학습 메뉴">
+      <script>
+        document.write(Shell.navMarkup('weakness'));
+        Shell.boot('weakness');
+      </script>
+    </nav>
+
+    <div class="sidebar__foot">
+      <button class="nav__link nav__link--quiet" type="button" data-action="로그아웃">
+        <svg class="nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H15" /><path d="M10 8l-4 4 4 4M6 12h9" /></svg>
+        <span>로그아웃</span>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="record" id="weakness" aria-labelledby="weaknessTitle">
+      <header class="record__head">
+        <div>
+          <h2 class="record__title" id="weaknessTitle">
+            <span class="record__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.6"/></svg>
+            </span>
+            <span>나의 약점 분석</span>
+          </h2>
+          <p class="record__lead">틀린 유형을 모아 AI가 약점을 짚고, 바로 5문제 집중 훈련을 시작합니다.</p>
+        </div>
+        <a class="record__all record__all--pill" href="review.html">오답노트 보기 &gt;</a>
+      </header>
+
+      <div class="weak__list" id="weakList"></div>
+    </section>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/questions.js"></script>
+<script src="js/api.js"></script>
+<script src="js/notes.js"></script>
+<script src="js/weakness.js"></script>
+</body>
+</html>

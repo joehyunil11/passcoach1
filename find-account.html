@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="js/boot.js"></script>
+<title>아이디/비밀번호 찾기 · 공무원 AI</title>
+<meta name="theme-color" content="#2563eb" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
+<link rel="stylesheet" href="css/base.css" />
+<link rel="stylesheet" href="css/shell.css" />
+<link rel="stylesheet" href="css/auth.css" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'" />
+<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" /></noscript>
+</head>
+<body class="auth-page">
+<a class="skip-link" href="#findIdForm">찾기로 건너뛰기</a>
+
+<header class="topbar">
+  <a class="topbar__home" href="index.html">
+    <span class="topbar__dot" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.4" /><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" /></svg>
+    </span>
+    공무원 AI
+  </a>
+  <div class="topbar__spacer"></div>
+  <div class="topbar__auth">
+    <a class="topbar__btn topbar__btn--ghost" href="login.html">로그인</a>
+    <a class="topbar__btn topbar__btn--primary" href="signup.html">회원가입</a>
+  </div>
+</header>
+
+<main class="auth">
+  <section class="auth__card auth__card--login" aria-labelledby="findTitle">
+    <h1 class="auth-regular__label" id="findTitle">아이디 / 비밀번호 찾기</h1>
+    <p class="auth-regular__login">FIND</p>
+    <p class="auth-find__lead">가입한 이름 또는 이메일로 아이디를 확인하고, 비밀번호 재설정 메일을 받을 수 있습니다.</p>
+
+    <div class="auth-find-tabs" role="tablist" aria-label="찾기 종류">
+      <button class="auth-find-tab is-active" type="button" role="tab" data-find-tab="id" aria-selected="true">아이디 찾기</button>
+      <button class="auth-find-tab" type="button" role="tab" data-find-tab="password" aria-selected="false">비밀번호 찾기</button>
+    </div>
+
+    <form class="auth__form auth__form--boxed" id="findIdForm" novalidate>
+      <label class="sr-only" for="findName">이름</label>
+      <input class="field" id="findName" name="name" type="text" autocomplete="name" required maxlength="40" placeholder="가입한 이름" />
+      <label class="sr-only" for="findIdEmail">이메일(선택)</label>
+      <input class="field" id="findIdEmail" name="email" type="text" inputmode="email" autocomplete="username" placeholder="이메일(선택)" />
+      <button class="auth-login-btn" type="submit">아이디 찾기</button>
+    </form>
+
+    <form class="auth__form auth__form--boxed" id="findPasswordForm" novalidate hidden>
+      <label class="sr-only" for="findPasswordEmail">이메일</label>
+      <input class="field" id="findPasswordEmail" name="email" type="text" inputmode="email" autocomplete="username" required placeholder="가입한 이메일" />
+      <button class="auth-login-btn" type="submit">재설정 메일 보내기</button>
+    </form>
+
+    <p class="auth-find__result" id="findResult" hidden></p>
+
+    <div class="auth-pills">
+      <a class="auth-pill" href="login.html">로그인</a>
+      <a class="auth-pill" href="signup.html">회원가입</a>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="js/shell.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>

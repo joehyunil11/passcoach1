@@ -1,0 +1,23 @@
+# Secrets
+.env
+.env.*
+SUPABASE.env
+
+# Node
+node_modules/
+
+# Runtime / local data
+data/
+.supabase/
+
+# Duplicate / scratch trees
+passcoach9ai/
+passcoach9ai2/
+tmp-*.js
+tmp-*.txt
+_probe-*.js
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log

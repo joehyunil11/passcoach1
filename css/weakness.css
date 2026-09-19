@@ -1,0 +1,87 @@
+/* 나의 약점 분석: 틀린 문항 요약 · AI 분석 · 집중 훈련 */
+
+#weakness .record__mark {
+  transform: translateY(-1px);
+}
+
+.weak__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.weak__report {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.weak__badge {
+  align-self: start;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.weak__headline {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+  text-align: center;
+}
+
+.weak__block {
+  padding: 14px 14px 12px;
+  border-radius: 12px;
+  background: #f7f9fd;
+}
+
+.weak__analysis {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 6px;
+}
+
+.weak__block-title {
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.weak__block-text {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.weak__drill {
+  margin-top: 10px;
+  height: 38px;
+  padding: 0 16px;
+}
+
+.weak__empty {
+  padding: 8px 2px 4px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .weak__report { padding: 16px 14px 14px; }
+  .weak__headline { font-size: 16.5px; }
+}

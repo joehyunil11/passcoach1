@@ -1,0 +1,4 @@
+project_id = "oekdmpneohvcjcwrcudf"
+
+[functions.ask-ai]
+verify_jwt = true

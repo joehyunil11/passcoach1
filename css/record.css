@@ -1,0 +1,241 @@
+/* ===== 학습 현황 카드 · 성적 표 (토큰은 base.css, 셸은 shell.css) ===== */
+
+.status,
+.record {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.status__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 132px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.stat__label {
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.stat__value {
+  margin-top: auto;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.6px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat__icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-top: 4px;
+  border-radius: 8px;
+}
+.stat__icon svg { width: 16px; height: 16px; stroke-width: 1.9; }
+.stat__icon--blue { background: var(--primary-soft); color: var(--primary); }
+.stat__icon--fire { background: #ffe8dc; color: #e85d2c; }
+
+.stat__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.stat__delta svg { width: 10px; height: 10px; stroke-width: 2.2; }
+.stat__delta.is-up { background: var(--green-soft); color: var(--green); }
+.stat__delta.is-down { background: #fdeeee; color: var(--red); }
+.stat__delta.is-down svg { transform: rotate(180deg); }
+
+.record__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.record__title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+}
+
+.record__mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+}
+.record__mark svg { width: 16px; height: 16px; stroke-width: 1.9; }
+
+.record__all {
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.record__all:hover { color: var(--primary-dark); text-decoration: underline; }
+.record__all--pill {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-size: 12.5px;
+}
+.record__all--pill:hover {
+  border-color: var(--primary);
+  background: #dce8ff;
+  text-decoration: none;
+}
+
+.record__lead {
+  margin-top: -4px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.record__subject {
+  color: inherit;
+  font-weight: 800;
+  text-decoration: none;
+}
+.record__subject:hover { color: var(--primary); text-decoration: underline; }
+
+/* ===== 과목 탭 ===== */
+.record__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding-bottom: 4px;
+}
+
+.record__tab {
+  padding: 6px 14px;
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.record__tab:hover { color: var(--primary); }
+.record__tab.is-active {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* ===== 표 ===== */
+.record__table-wrap { overflow-x: auto; }
+
+.record__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.record__table th,
+.record__table td {
+  padding: 13px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.record__table th {
+  background: #f4f6fb;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.record__table th:first-child,
+.record__table td:first-child {
+  padding-left: 16px;
+  text-align: left;
+}
+.record__table th:last-child,
+.record__table td:last-child { padding-right: 16px; }
+
+.record__table tbody tr:last-child td { border-bottom: 0; }
+
+.record__topic { color: var(--text); font-weight: 800; }
+.record__count { color: var(--text-soft); font-weight: 700; }
+.record__rate { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.record__empty {
+  padding: 36px 16px !important;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: center !important;
+}
+
+/* ===== 난이도 막대 ===== */
+.bar {
+  display: block;
+  width: min(220px, 100%);
+  height: 10px;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eceff5;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+}
+.bar.is-mid > span { background: #c9a227; }
+.bar.is-low > span { background: var(--orange); }
+.bar.is-empty > span { width: 0 !important; background: transparent; }
+
+@media (max-width: 980px) {
+  .status__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .record,
+  .status { padding: 14px 12px 16px; }
+  .record__table th,
+  .record__table td { padding: 11px 8px; font-size: 12.5px; }
+  .bar { width: 100%; }
+  .stat__value { font-size: 22px; }
+}
+
+@media (max-width: 420px) {
+  .status__grid { grid-template-columns: 1fr; }
+}
