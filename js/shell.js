@@ -184,10 +184,28 @@ const Shell = (() => {
       <a class="topbar__btn topbar__btn--primary" href="signup.html">회원가입</a>`;
   }
 
+  function apiRequest(path, options = {}) {
+    if (typeof Cloud !== 'undefined' && Cloud.isPages()) return Cloud.request(path, options);
+    if (typeof AppApi !== 'undefined') {
+      const method = String(options.method || 'GET').toUpperCase();
+      if (method === 'GET') return AppApi.get(path);
+      if (method === 'POST') return AppApi.post(path, options.body ? JSON.parse(options.body) : {});
+      if (method === 'PUT') return AppApi.put(path, options.body ? JSON.parse(options.body) : {});
+    }
+    return fetch(path, {
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options,
+    }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw Object.assign(new Error(data.error || `요청 실패 (${res.status})`), { status: res.status });
+      return data;
+    });
+  }
+
   function loadSession() {
     if (sessionReady) return sessionReady;
-    sessionReady = fetch('/api/session', { credentials: 'same-origin' })
-      .then((res) => res.json())
+    sessionReady = apiRequest('/api/session')
       .then((data) => {
         currentUser = (data && data.user) || null;
         renderTopbarAuth(currentUser);
@@ -231,12 +249,7 @@ const Shell = (() => {
 
   async function logoutAndLeave() {
     try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-      });
+      await apiRequest('/api/auth/logout', { method: 'POST', body: '{}' });
     } catch {
       /* ignore */
     }
@@ -329,8 +342,7 @@ const Shell = (() => {
 
   function loadEntitlements() {
     if (entitlementsReady) return entitlementsReady;
-    entitlementsReady = fetch('/api/entitlements', { credentials: 'same-origin' })
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
+    entitlementsReady = apiRequest('/api/entitlements')
       .then((data) => mergeEntitlements(data))
       .catch(() => entitlements);
     return entitlementsReady;

@@ -112,9 +112,7 @@
 
   async function detectProxy() {
     try {
-      const res = await fetch('/api/health');
-      if (!res.ok) return false;
-      const data = await res.json();
+      const data = typeof AppApi !== 'undefined' ? await AppApi.get('/api/health') : await fetch('/api/health').then((r) => r.json());
       proxyHasKey = Boolean(data.ai || data.provider);
       return true;
     } catch {
@@ -155,23 +153,27 @@
       const key = localKey();
       if (key) body.apiKey = key;
     }
-    const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
+    const data = typeof AppApi !== 'undefined'
+      ? await AppApi.post('/api/ask', body)
+      : await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(body),
+        }).then(async (res) => {
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            const err = new Error(payload.error || '서버 응답에 실패했습니다.');
+            err.code = payload.error;
+            err.status = res.status;
+            throw err;
+          }
+          return payload;
+        });
     if (data.usage) {
       renderUsage(data.usage);
       const ent = Shell.getEntitlements && Shell.getEntitlements();
       if (ent) ent.ai = { ...ent.ai, ...data.usage };
-    }
-    if (!res.ok) {
-      const err = new Error(data.error || '서버 응답에 실패했습니다.');
-      err.code = data.error;
-      err.status = res.status;
-      throw err;
     }
     return data.answer;
   }

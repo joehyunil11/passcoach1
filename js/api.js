@@ -14,6 +14,16 @@ const AppApi = (() => {
   }
 
   async function request(path, options = {}) {
+    if (typeof Cloud !== 'undefined' && Cloud.isPages()) {
+      try {
+        return await Cloud.request(path, options);
+      } catch (err) {
+        if (err.status === 401 && path !== '/api/session' && !String(path).startsWith('/api/auth/')) {
+          handleUnauthorized();
+        }
+        throw err;
+      }
+    }
     const res = await fetch(path, {
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },

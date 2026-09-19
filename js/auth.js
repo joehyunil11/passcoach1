@@ -88,6 +88,11 @@
     if (event.target.closest('[data-auth-help]')) {
       toast('아이디는 가입한 이메일입니다. 비밀번호는 6자 이상이어야 합니다.');
     }
+    const snsBtn = event.target.closest('a.sns-btn, a[href*="/api/auth/kakao"], a[href*="/api/auth/naver"]');
+    if (snsBtn && typeof Cloud !== 'undefined' && Cloud.isPages()) {
+      event.preventDefault();
+      toast('GitHub Pages에서는 이메일로 로그인·가입해 주세요.');
+    }
   });
 
   function bindSubmit(form, submitBtn, handler) {
@@ -159,9 +164,14 @@
       }
 
       try {
-        await AppApi.post('/api/auth/signup', { name, email, password });
-        toast('회원가입이 완료되었습니다.');
-        location.href = safeNext();
+        const data = await AppApi.post('/api/auth/signup', { name, email, password });
+        if (data && data.user) {
+          toast('회원가입이 완료되었습니다.');
+          location.href = safeNext();
+          return;
+        }
+        toast((data && data.message) || '가입 확인 메일을 확인해 주세요.');
+        location.href = 'login.html';
       } catch (err) {
         toast(err.message || '회원가입에 실패했습니다.');
       }

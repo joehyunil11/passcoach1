@@ -78,9 +78,8 @@
 
   async function loadSubjects() {
     try {
-      const res = await fetch('/api/subjects');
-      const data = await res.json();
-      if (!res.ok || !Array.isArray(data.subjects) || !data.subjects.length) {
+      const data = typeof AppApi !== 'undefined' ? await AppApi.get('/api/subjects') : await fetch('/api/subjects').then((r) => r.json());
+      if (!Array.isArray(data.subjects) || !data.subjects.length) {
         await applyLocalQuestionCounts();
         return;
       }

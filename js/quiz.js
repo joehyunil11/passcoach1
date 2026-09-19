@@ -288,6 +288,8 @@
   function toQuestionImageUrl(src) {
     const value = String(src || '').trim();
     if (!value) return '';
+    const onPages = typeof Cloud !== 'undefined' && Cloud.isPages();
+    if (onPages && /^https?:\/\//i.test(value)) return value;
     if (value.startsWith('/api/question-image')) return value;
     const markers = ['/storage/v1/object/public/', '/storage/v1/object/sign/', '/storage/v1/object/authenticated/'];
     let rest = '';
@@ -318,6 +320,13 @@
     }
     if (!objectPath) return value;
     objectPath = objectPath.replace(/^(history\/60\/q42)(\.[a-z0-9]+)$/i, '$1v2$2');
+    if (typeof Cloud !== 'undefined' && Cloud.isPages()) {
+      return `https://oekdmpneohvcjcwrcudf.supabase.co/storage/v1/object/public/${bucket}/${objectPath
+        .split('/')
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join('/')}`;
+    }
     return `/api/question-image?bucket=${encodeURIComponent(bucket)}&path=${encodeURIComponent(objectPath)}`;
   }
 
