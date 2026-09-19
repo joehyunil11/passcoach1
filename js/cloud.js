@@ -185,7 +185,14 @@ const Cloud = (() => {
       body: options.body,
     });
     if (res.status === 204) return null;
-    const data = await res.json().catch(() => ({}));
+    const text = await res.text();
+    if (!text) return method === 'GET' ? [] : null;
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      fail('문제 데이터를 읽지 못했습니다. 다시 시도해 주세요.', res.status || 500);
+    }
     if (!res.ok) fail((data && (data.message || data.error || data.hint)) || `요청 실패 (${res.status})`, res.status);
     return data;
   }
@@ -396,16 +403,17 @@ const Cloud = (() => {
     };
   }
 
-  async function fetchPages(makePath) {
+  async function fetchPages(makePath, pageSize = 200) {
     const out = [];
+    const size = Math.max(50, Number(pageSize) || 200);
     let from = 0;
     while (from < 50000) {
-      const to = from + 999;
+      const to = from + size - 1;
       const rows = await rest(makePath(), { anon: true, headers: { Range: `${from}-${to}` } });
       const list = Array.isArray(rows) ? rows : [];
       out.push(...list);
-      if (list.length < 1000) break;
-      from += 1000;
+      if (list.length < size) break;
+      from += size;
     }
     return out;
   }
@@ -448,42 +456,50 @@ const Cloud = (() => {
 
   async function loadQuestionRows(wanted) {
     const select = 'id,subjects,kind,type,question,option1,option2,option3,option4,option5,answer,explanation,image_url';
-    const aliases = uniqueAliases(wanted);
-    const filter = subjectQuery(wanted);
-    try {
-      return await fetchPages(() => `/rest/v1/questions?select=${select}&${filter}&order=id.asc`);
-    } catch {
-      const collected = [];
-      const seen = new Set();
-      for (let i = 0; i < aliases.length; i += 1) {
-        try {
-          const rows = await fetchPages(
-            () => `/rest/v1/questions?select=${select}&subjects=eq.${encodeURIComponent(aliases[i])}&order=id.asc`
-          );
-          rows.forEach((row) => {
-            if (seen.has(row.id)) return;
-            seen.add(row.id);
-            collected.push(row);
-          });
-          if (rows.length) break;
-        } catch {
-          /* try next alias */
-        }
+    const aliases = uniqueAliases(wanted).sort((a, b) => {
+      const ah = /[가-힣]/.test(a) ? 0 : 1;
+      const bh = /[가-힣]/.test(b) ? 0 : 1;
+      return ah - bh;
+    });
+    const seen = new Set();
+    const collected = [];
+    const addRows = (rows) => {
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        if (!row || seen.has(row.id)) return;
+        seen.add(row.id);
+        collected.push(row);
+      });
+    };
+    for (let i = 0; i < aliases.length; i += 1) {
+      try {
+        addRows(
+          await fetchPages(
+            () => `/rest/v1/questions?select=${select}&subjects=eq.${encodeURIComponent(aliases[i])}&order=id.asc`,
+            150
+          )
+        );
+        if (collected.length) return collected;
+      } catch {
+        /* next alias */
       }
-      if (collected.length) return collected;
-      return fetchPages(() => `/rest/v1/questions?select=*&${filter}&order=id.asc`);
     }
+    try {
+      addRows(await fetchPages(() => `/rest/v1/questions?select=${select}&${subjectQuery(wanted)}&order=id.asc`, 150));
+    } catch {
+      addRows(await fetchPages(() => `/rest/v1/questions?select=*&subjects=eq.${encodeURIComponent(aliases[0] || wanted)}&order=id.asc`, 80));
+    }
+    return collected;
   }
 
   async function listQuestions(search) {
     const subjects = search.get('subjects') || search.get('subject') || 'korean';
     const wanted = resolveSubjectId(subjects) || subjects;
-    if (questionCache.has(wanted)) {
+    if (questionCache.has(wanted) && questionCache.get(wanted).length) {
       return { source: 'supabase', subjects: wanted, questions: questionCache.get(wanted) };
     }
     const rows = await loadQuestionRows(wanted);
     const questions = rows.map(mapQuestion);
-    questionCache.set(wanted, questions);
+    if (questions.length) questionCache.set(wanted, questions);
     return { source: 'supabase', subjects: wanted, questions };
   }
 

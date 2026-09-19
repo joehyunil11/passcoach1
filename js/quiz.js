@@ -1435,7 +1435,10 @@
     syncSimilarAccess();
     renderQuota();
     try {
-      const data = await AppApi.getQuestions(subjectId);
+      let data = await AppApi.getQuestions(subjectId);
+      if ((!Array.isArray(data.questions) || !data.questions.length) && subjectId === 'korean') {
+        data = await AppApi.getQuestions('국어');
+      }
       if (Array.isArray(data.questions) && data.questions.length) {
         questions = data.questions;
         if (QUESTION_BANK[subjectId]) QUESTION_BANK[subjectId].questions = questions;
