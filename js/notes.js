@@ -156,7 +156,8 @@ const StudyLog = (() => {
     if (!boot) {
       boot = (async () => {
         try {
-          if (typeof AppApi !== 'undefined' && typeof QUESTION_BANK === 'object') {
+          const onPages = typeof Cloud !== 'undefined' && Cloud.isPages && Cloud.isPages();
+          if (!onPages && typeof AppApi !== 'undefined' && typeof QUESTION_BANK === 'object') {
             const ids = Object.keys(QUESTION_BANK);
             await Promise.all(
               ids.map(async (id) => {
