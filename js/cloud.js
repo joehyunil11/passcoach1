@@ -112,31 +112,61 @@ const Cloud = (() => {
     return data;
   }
 
+  function expirySeconds(value, fallbackToken) {
+    let exp = Number(value);
+    if (exp > 1e12) exp = Math.floor(exp / 1000);
+    if (exp > 1e9) return exp;
+    if (fallbackToken) {
+      try {
+        const payload = JSON.parse(atob(String(fallbackToken).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        const jwtExp = Number(payload.exp);
+        if (jwtExp > 1e9) return jwtExp;
+      } catch {
+        /* ignore */
+      }
+    }
+    return 0;
+  }
+
+  function sessionFresh(session) {
+    if (!session || !session.access_token) return false;
+    const exp = expirySeconds(session.expires_at, session.access_token);
+    return exp * 1000 > Date.now() + 30_000;
+  }
+
   async function refreshIfNeeded() {
     const session = saved();
-    if (!session || !session.refresh_token) return session;
-    const exp = Number(session.expires_at);
-    if (exp && exp * 1000 > Date.now() + 30_000) return session;
+    if (!session || !session.access_token) return session;
+    if (sessionFresh(session)) return session;
+    if (!session.refresh_token) return session;
     try {
       const data = await authPost('/auth/v1/token?grant_type=refresh_token', { refresh_token: session.refresh_token });
       const next = {
         ...session,
         ...data,
         user: data.user || session.user,
-        expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+        expires_at:
+          expirySeconds(data.expires_at, data.access_token) ||
+          Math.floor(Date.now() / 1000) + (Number(data.expires_in) || 3600),
       };
       save(next);
       return next;
     } catch {
-      save(null);
-      return null;
+      return session;
     }
   }
 
+  function isPublicRead(path, method) {
+    if (method !== 'GET' && method !== 'HEAD') return false;
+    const pathname = String(path || '').split('?')[0];
+    return pathname === '/rest/v1/questions' || pathname === '/rest/v1/subjects';
+  }
+
   async function rest(path, options = {}) {
-    const session = await refreshIfNeeded();
-    const token = (session && session.access_token) || SUPABASE_ANON_KEY;
     const method = String(options.method || 'GET').toUpperCase();
+    const publicRead = options.anon === true || isPublicRead(path, method);
+    const session = publicRead ? saved() : await refreshIfNeeded();
+    const token = publicRead ? SUPABASE_ANON_KEY : (session && session.access_token) || SUPABASE_ANON_KEY;
     const headers = {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${token}`,
@@ -160,6 +190,20 @@ const Cloud = (() => {
     return data;
   }
 
+  async function publicFetch(path, extraHeaders) {
+    return fetch(`${SUPABASE_URL}${path}`, {
+      method: 'GET',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        Accept: 'application/json',
+        'Accept-Profile': 'public',
+        Prefer: 'return=representation',
+        ...(extraHeaders || {}),
+      },
+    });
+  }
+
   async function rpc(name, args) {
     return rest(`/rest/v1/rpc/${name}`, { method: 'POST', body: JSON.stringify(args || {}) });
   }
@@ -174,7 +218,9 @@ const Cloud = (() => {
     save({
       access_token: data.access_token,
       refresh_token: data.refresh_token,
-      expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+      expires_at:
+        expirySeconds(data.expires_at, data.access_token) ||
+        Math.floor(Date.now() / 1000) + (Number(data.expires_in) || 3600),
       user: data.user,
     });
     return { user: publicUser(data.user) };
@@ -194,7 +240,9 @@ const Cloud = (() => {
       save({
         access_token: data.access_token,
         refresh_token: data.refresh_token,
-        expires_at: data.expires_at || Math.floor(Date.now() / 1000) + (data.expires_in || 3600),
+        expires_at:
+          expirySeconds(data.expires_at, data.access_token) ||
+          Math.floor(Date.now() / 1000) + (Number(data.expires_in) || 3600),
         user: data.user,
       });
       return { user: publicUser(data.user) };
@@ -353,7 +401,7 @@ const Cloud = (() => {
     let from = 0;
     while (from < 50000) {
       const to = from + 999;
-      const rows = await rest(makePath(), { headers: { Range: `${from}-${to}` } });
+      const rows = await rest(makePath(), { anon: true, headers: { Range: `${from}-${to}` } });
       const list = Array.isArray(rows) ? rows : [];
       out.push(...list);
       if (list.length < 1000) break;
@@ -369,21 +417,62 @@ const Cloud = (() => {
     return subjectRowCache;
   }
 
+  async function countSubject(id) {
+    const filter = subjectQuery(id);
+    const res = await publicFetch(`/rest/v1/questions?select=id&${filter}`, {
+      Prefer: 'count=exact',
+      Range: '0-0',
+    });
+    if (!res.ok) return 0;
+    const range = res.headers.get('content-range') || '';
+    const total = range.split('/')[1];
+    if (!total || total === '*') return 0;
+    return Number(total) || 0;
+  }
+
   async function listSubjects() {
     const subjects = await loadSubjectRows();
     const tallies = {};
     try {
-      const rows = await fetchPages(() => '/rest/v1/questions?select=subjects');
-      subjectNameCache = [...new Set(rows.map((row) => String(row.subjects || '').trim()).filter(Boolean))];
-      rows.forEach((row) => {
-        const id = resolveSubjectId(row.subjects);
-        if (id) tallies[id] = (tallies[id] || 0) + 1;
-      });
+      await Promise.all(
+        SUBJECT_IDS.map(async (id) => {
+          tallies[id] = await countSubject(id);
+        })
+      );
     } catch {
-      subjectNameCache = subjectNameCache || [];
+      /* counts optional */
     }
     countCache = tallies;
     return { source: 'supabase', subjects, counts: tallies };
+  }
+
+  async function loadQuestionRows(wanted) {
+    const select = 'id,subjects,kind,type,question,option1,option2,option3,option4,option5,answer,explanation,image_url';
+    const aliases = uniqueAliases(wanted);
+    const filter = subjectQuery(wanted);
+    try {
+      return await fetchPages(() => `/rest/v1/questions?select=${select}&${filter}&order=id.asc`);
+    } catch {
+      const collected = [];
+      const seen = new Set();
+      for (let i = 0; i < aliases.length; i += 1) {
+        try {
+          const rows = await fetchPages(
+            () => `/rest/v1/questions?select=${select}&subjects=eq.${encodeURIComponent(aliases[i])}&order=id.asc`
+          );
+          rows.forEach((row) => {
+            if (seen.has(row.id)) return;
+            seen.add(row.id);
+            collected.push(row);
+          });
+          if (rows.length) break;
+        } catch {
+          /* try next alias */
+        }
+      }
+      if (collected.length) return collected;
+      return fetchPages(() => `/rest/v1/questions?select=*&${filter}&order=id.asc`);
+    }
   }
 
   async function listQuestions(search) {
@@ -392,8 +481,7 @@ const Cloud = (() => {
     if (questionCache.has(wanted)) {
       return { source: 'supabase', subjects: wanted, questions: questionCache.get(wanted) };
     }
-    const filter = subjectQuery(wanted);
-    const rows = await fetchPages(() => `/rest/v1/questions?select=*&${filter}&order=id.asc`);
+    const rows = await loadQuestionRows(wanted);
     const questions = rows.map(mapQuestion);
     questionCache.set(wanted, questions);
     return { source: 'supabase', subjects: wanted, questions };
