@@ -1548,7 +1548,7 @@ function planEntitlements(plan) {
     return {
       plan: 'premium',
       questions: { limit: null, kind: 'day', label: '오늘' },
-      ai: { limit: 1000, kind: 'month', label: '이번 달' },
+      ai: { limit: 100, kind: 'month', label: '이번 달' },
       features: { review: true, record: true, grades: true, weakness: true, similar: true, teacher: true },
     };
   }
