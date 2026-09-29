@@ -1,0 +1,5 @@
+.vscode
+.supabase
+supabase/.temp
+data
+*.log

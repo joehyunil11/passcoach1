@@ -836,9 +836,27 @@ function redirect(res, location) {
 
 function requestOrigin(req) {
   const forwarded = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-  const proto = forwarded || 'http';
-  const host = String(req.headers.host || `127.0.0.1:${PORT}`).trim();
+  const proto = forwarded || (process.env.VERCEL ? 'https' : 'http');
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || `127.0.0.1:${PORT}`)
+    .split(',')[0]
+    .trim();
   return `${proto}://${host}`;
+}
+
+function incomingUrl(req) {
+  let raw = String(req.url || '/');
+  if (!process.env.VERCEL) return raw;
+  const pathOnly = raw.split('?')[0];
+  const destOnly =
+    pathOnly === '/api' ||
+    pathOnly === '/api/' ||
+    pathOnly === '/api/index' ||
+    pathOnly === '/api/index.js';
+  if (!destOnly) return raw;
+  const forwarded = String(
+    req.headers['x-forwarded-uri'] || req.headers['x-invoke-path'] || ''
+  ).trim();
+  return forwarded || raw;
 }
 
 function envValue(...names) {
@@ -3082,8 +3100,10 @@ async function getLegalPage(slug) {
   return mapLegalPage(data);
 }
 
-const server = http.createServer(async (req, res) => {
+async function handleRequest(req, res) {
   setSecurityHeaders(res);
+  const restored = incomingUrl(req);
+  if (restored && restored !== req.url) req.url = restored;
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
 
   if (req.method === 'OPTIONS') {
@@ -4261,18 +4281,24 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(fp)] || 'application/octet-stream' });
     res.end(data);
   });
-});
+}
 
-server.listen(PORT, '127.0.0.1', () => {
-  const kind = provider();
-  const supabase = Boolean(supabaseConfig());
+const server = http.createServer(handleRequest);
 
-  console.log(`Server running at http://127.0.0.1:${PORT}`);
-  console.log(kind === 'supabase' ? 'AI provider: supabase Edge Function ask-ai' : kind ? `AI provider: ${kind}` : 'AI key missing');
-  console.log(
-    supabase
-      ? 'Supabase configuration loaded'
-      : 'Supabase configuration missing'
-  );
-  questionIndexMaps().catch((err) => console.warn('question index warm', err && err.message));
-});
+if (!process.env.VERCEL) {
+  server.listen(PORT, process.env.HOST || '127.0.0.1', () => {
+    const kind = provider();
+    const supabase = Boolean(supabaseConfig());
+
+    console.log(`Server running at http://127.0.0.1:${PORT}`);
+    console.log(kind === 'supabase' ? 'AI provider: supabase Edge Function ask-ai' : kind ? `AI provider: ${kind}` : 'AI key missing');
+    console.log(
+      supabase
+        ? 'Supabase configuration loaded'
+        : 'Supabase configuration missing'
+    );
+    questionIndexMaps().catch((err) => console.warn('question index warm', err && err.message));
+  });
+}
+
+module.exports = handleRequest;

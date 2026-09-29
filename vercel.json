@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "name": "passcoach1",
+  "framework": null,
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "{*.html,css/**,js/**,img/**,server.js,server-store.js}",
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api" }
+  ]
+}

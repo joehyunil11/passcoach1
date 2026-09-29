@@ -4,7 +4,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const STORE_PATH = path.join(__dirname, 'data', 'app-store.json');
+const STORE_PATH = process.env.VERCEL
+  ? path.join('/tmp', 'passcoach-app-store.json')
+  : path.join(__dirname, 'data', 'app-store.json');
 
 const DEFAULT_ACCOUNT = {
   name: '',
@@ -81,6 +83,7 @@ function cookieString(name, value, maxAgeSec) {
     'HttpOnly',
     'SameSite=Lax',
   ];
+  if (process.env.VERCEL) parts.push('Secure');
   if (maxAgeSec != null) parts.push(`Max-Age=${maxAgeSec}`);
   return parts.join('; ');
 }

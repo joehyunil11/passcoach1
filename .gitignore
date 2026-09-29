@@ -9,6 +9,7 @@ node_modules/
 # Runtime / local data
 data/
 .supabase/
+.vercel/
 
 # Duplicate / scratch trees
 passcoach9ai/

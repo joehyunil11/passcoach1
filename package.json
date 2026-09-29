@@ -6,9 +6,10 @@
   "version": "1.0.0",
   "description": "9급 공무원 시험 준비생을 위한 AI 문제풀이 학습 플랫폼의 **메인 홈 화면**입니다.\r 별도의 빌드 도구나 프레임워크 없이 HTML · CSS · 바닐라 JavaScript로만 구현했습니다.",
   "main": "server.js",
- 
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
- 
     "start": "node server.js",
     "dev": "node server.js"
   },
