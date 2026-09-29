@@ -825,8 +825,6 @@ function readBody(req, limit) {
   });
 }
 
-const oauthStates = new Map();
-
 function redirect(res, location) {
   setSecurityHeaders(res);
   res.statusCode = 302;
@@ -846,17 +844,25 @@ function requestOrigin(req) {
 function incomingUrl(req) {
   let raw = String(req.url || '/');
   if (!process.env.VERCEL) return raw;
-  const pathOnly = raw.split('?')[0];
-  const destOnly =
-    pathOnly === '/api' ||
-    pathOnly === '/api/' ||
-    pathOnly === '/api/index' ||
-    pathOnly === '/api/index.js';
-  if (!destOnly) return raw;
   const forwarded = String(
-    req.headers['x-forwarded-uri'] || req.headers['x-invoke-path'] || ''
+    req.headers['x-forwarded-uri'] ||
+      req.headers['x-invoke-path'] ||
+      req.headers['x-vercel-original-url'] ||
+      ''
   ).trim();
-  return forwarded || raw;
+  if (forwarded && forwarded.startsWith('/')) {
+    const forwardedPath = forwarded.split('?')[0];
+    const pathOnly = raw.split('?')[0];
+    const destOnly =
+      pathOnly === '/api' ||
+      pathOnly === '/api/' ||
+      pathOnly === '/api/index' ||
+      pathOnly === '/api/index.js';
+    if (destOnly || (forwardedPath.startsWith('/api/') && forwardedPath !== pathOnly)) {
+      return forwarded.includes('?') || !raw.includes('?') ? forwarded : `${forwardedPath}${raw.slice(pathOnly.length)}`;
+    }
+  }
+  return raw;
 }
 
 function envValue(...names) {
@@ -867,17 +873,40 @@ function envValue(...names) {
   return '';
 }
 
+function oauthSigningKey() {
+  return (
+    envValue('OAUTH_STATE_SECRET', 'KAKAO_REST_API_KEY', 'KAKAO_CLIENT_ID', 'SUPABASE_ANON_KEY') ||
+    DEFAULT_SUPABASE_ANON_KEY ||
+    'passcoach-oauth'
+  );
+}
+
 function makeOAuthState(provider) {
-  const state = crypto.randomBytes(16).toString('hex');
-  oauthStates.set(state, { provider, at: Date.now() });
-  return state;
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const payload = `${provider}.${Date.now()}.${nonce}`;
+  const sig = crypto.createHmac('sha256', oauthSigningKey()).update(payload).digest('hex');
+  return `${payload}.${sig}`;
 }
 
 function takeOAuthState(state, provider) {
-  const rec = oauthStates.get(state);
-  if (rec) oauthStates.delete(state);
-  if (!rec || rec.provider !== provider) return false;
-  if (Date.now() - rec.at > 10 * 60 * 1000) return false;
+  const raw = String(state || '');
+  const lastDot = raw.lastIndexOf('.');
+  if (lastDot < 1) return false;
+  const payload = raw.slice(0, lastDot);
+  const sig = raw.slice(lastDot + 1);
+  const parts = payload.split('.');
+  if (parts.length !== 3) return false;
+  const [p, at, nonce] = parts;
+  if (p !== provider || !/^\d+$/.test(at) || !/^[a-f0-9]{32}$/.test(nonce)) return false;
+  const expected = crypto.createHmac('sha256', oauthSigningKey()).update(payload).digest('hex');
+  try {
+    const a = Buffer.from(sig, 'hex');
+    const b = Buffer.from(expected, 'hex');
+    if (a.length !== b.length || a.length === 0 || !crypto.timingSafeEqual(a, b)) return false;
+  } catch {
+    return false;
+  }
+  if (Date.now() - Number(at) > 10 * 60 * 1000) return false;
   return true;
 }
 
@@ -3421,7 +3450,13 @@ async function handleRequest(req, res) {
         body,
       });
       const token = await tokenRes.json();
-      if (!tokenRes.ok || !token.access_token) return snsErrorRedirect(res, 'kakao', 'failed');
+      if (!tokenRes.ok || !token.access_token) {
+        const desc = `${token.error || ''} ${token.error_description || ''}`.toLowerCase();
+        console.warn('kakao token', token.error || tokenRes.status);
+        if (desc.includes('redirect')) return snsErrorRedirect(res, 'kakao', 'redirect');
+        if (desc.includes('secret') || desc.includes('client')) return snsErrorRedirect(res, 'kakao', 'secret');
+        return snsErrorRedirect(res, 'kakao', 'failed');
+      }
       const meRes = await fetch('https://kapi.kakao.com/v2/user/me', {
         headers: { Authorization: `Bearer ${token.access_token}` },
       });

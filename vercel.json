@@ -3,9 +3,20 @@
   "name": "passcoach1",
   "framework": null,
   "functions": {
+    "api/index.js": {
+      "includeFiles": "{*.html,css/**,js/**,img/**,server.js,server-store.js}",
+      "maxDuration": 60
+    },
     "api/[[...slug]].js": {
       "includeFiles": "{*.html,css/**,js/**,img/**,server.js,server-store.js}",
       "maxDuration": 60
+    },
+    "api/auth/[...path].js": {
+      "includeFiles": "{*.html,css/**,js/**,img/**,server.js,server-store.js}",
+      "maxDuration": 60
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" }
+  ]
 }

@@ -75,6 +75,10 @@
       }[sns] || msg;
     } else if (snsError === 'denied') {
       msg = `${label} 로그인을 취소했습니다.`;
+    } else if (snsError === 'redirect') {
+      msg = '카카오 Redirect URI가 다릅니다. 카카오 개발자 콘솔에 현재 주소의 /api/auth/kakao/callback 을 등록해 주세요.';
+    } else if (snsError === 'secret') {
+      msg = '카카오 Client Secret이 켜져 있으면 .env에 KAKAO_CLIENT_SECRET도 넣어 주세요.';
     }
     toast(msg);
     const row = document.querySelector('.auth-sns__row');
