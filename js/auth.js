@@ -64,13 +64,15 @@
   const sns = snsParams.get('sns');
   const snsError = snsParams.get('sns_error');
   if (snsError) {
-    const label = sns === 'naver' ? '네이버' : '카카오';
+    const labels = { naver: '네이버', kakao: '카카오', google: '구글' };
+    const label = labels[sns] || '소셜';
     let msg = `${label} 로그인에 실패했습니다.`;
     if (snsError === 'nokey') {
-      msg =
-        sns === 'naver'
-          ? '네이버 로그인 키가 없습니다. .env에 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET를 넣은 뒤 서버를 다시 실행해 주세요.'
-          : '카카오 로그인 키가 없습니다. .env에 KAKAO_REST_API_KEY를 넣은 뒤 서버를 다시 실행해 주세요.';
+      msg = {
+        naver: '네이버 로그인 키가 없습니다. .env에 NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET를 넣은 뒤 서버를 다시 실행해 주세요.',
+        kakao: '카카오 로그인 키가 없습니다. .env에 KAKAO_REST_API_KEY를 넣은 뒤 서버를 다시 실행해 주세요.',
+        google: '구글 로그인 키가 없습니다. .env에 GOOGLE_CLIENT_ID와 GOOGLE_CLIENT_SECRET를 넣은 뒤 서버를 다시 실행해 주세요.',
+      }[sns] || msg;
     } else if (snsError === 'denied') {
       msg = `${label} 로그인을 취소했습니다.`;
     }
@@ -88,7 +90,7 @@
     if (event.target.closest('[data-auth-help]')) {
       toast('아이디는 가입한 이메일입니다. 비밀번호는 6자 이상이어야 합니다.');
     }
-    const snsBtn = event.target.closest('a.sns-btn, a[href*="/api/auth/kakao"], a[href*="/api/auth/naver"]');
+    const snsBtn = event.target.closest('a.sns-btn, a[href*="/api/auth/kakao"], a[href*="/api/auth/naver"], a[href*="/api/auth/google"]');
     if (snsBtn && typeof Cloud !== 'undefined' && Cloud.isPages()) {
       event.preventDefault();
       toast('GitHub Pages에서는 이메일로 로그인·가입해 주세요.');
@@ -141,7 +143,10 @@
   const signupForm = $('#signupForm');
   if (signupForm) {
     bindSubmit(signupForm, signupForm.querySelector('.auth-login-btn'), async () => {
-      const name = $('#signupName').value.trim();
+      const name = (window.PasscoachXss && PasscoachXss.stripTags
+        ? PasscoachXss.stripTags($('#signupName').value)
+        : $('#signupName').value
+      ).trim().slice(0, 20);
       const email = $('#signupEmail').value.trim();
       const password = $('#signupPassword').value;
       const again = $('#signupPasswordAgain').value;

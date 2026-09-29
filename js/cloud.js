@@ -10,6 +10,20 @@ const Cloud = (() => {
   const AUTH_KEY = 'passcoach.auth';
   const LOG_KEY = 'passcoach.studyLog';
   const NOTES_KEY = 'passcoach.wrongNotes';
+  const GUEST_KEY = 'passcoach.guestId';
+  const AI_USED_KEY = 'passcoach.aiUsed';
+  const CONFIG = (typeof window !== 'undefined' && window.PasscoachConfig) || {};
+  const FREE_PERIOD = !!CONFIG.freePeriod;
+  const AI_LIMIT = Number(CONFIG.aiLimit) || 100;
+  const AI_LABEL = CONFIG.aiLabel || '무료 이용기간';
+
+  function plainText(value, maxLen) {
+    const xss = typeof PasscoachXss !== 'undefined' ? PasscoachXss : null;
+    let s = xss && xss.stripTags ? xss.stripTags(value) : String(value == null ? '' : value);
+    s = String(s).trim();
+    if (Number.isInteger(maxLen) && maxLen > 0) s = s.slice(0, maxLen);
+    return s;
+  }
   const SUBJECT_IDS = [
     'korean',
     'english',
@@ -81,7 +95,49 @@ const Cloud = (() => {
       name,
       email: user.email,
       provider: meta.provider || 'email',
+      created_at: user.created_at || null,
     };
+  }
+
+  function formatJoined(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+        .format(d)
+        .replace(/-/g, '.');
+    } catch {
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+    }
+  }
+
+  async function authUserRecord() {
+    const session = await refreshIfNeeded();
+    if (!session || !session.access_token) return session && session.user ? session.user : null;
+    if (session.user && session.user.created_at) return session.user;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const user = await res.json().catch(() => null);
+      if (user && user.id) {
+        save({ ...session, user });
+        return user;
+      }
+    } catch {
+      /* ignore */
+    }
+    return session.user || null;
   }
 
   function translateAuth(data, fallback) {
@@ -159,7 +215,7 @@ const Cloud = (() => {
   function isPublicRead(path, method) {
     if (method !== 'GET' && method !== 'HEAD') return false;
     const pathname = String(path || '').split('?')[0];
-    return pathname === '/rest/v1/questions' || pathname === '/rest/v1/subjects';
+    return pathname === '/rest/v1/questions' || pathname === '/rest/v1/subjects' || pathname === '/rest/v1/legal_pages';
   }
 
   async function rest(path, options = {}) {
@@ -215,9 +271,15 @@ const Cloud = (() => {
     return rest(`/rest/v1/rpc/${name}`, { method: 'POST', body: JSON.stringify(args || {}) });
   }
 
-  async function currentUser() {
+  /* 비회원이 개인 학습 RPC를 부르면 user_id 가 비어 있는 공용 행에 섞이므로, 이 기기(localStorage)에만 저장한다 */
+  async function userRpc(name, args) {
     const session = await refreshIfNeeded();
-    return publicUser(session && session.user);
+    if (!session || !session.access_token) fail('로그인 후 이용하세요', 401);
+    return rpc(name, args);
+  }
+
+  async function currentUser() {
+    return publicUser(await authUserRecord());
   }
 
   async function login({ email, password }) {
@@ -230,15 +292,18 @@ const Cloud = (() => {
         Math.floor(Date.now() / 1000) + (Number(data.expires_in) || 3600),
       user: data.user,
     });
+    await rejectWithdrawn();
+    await ensureSignupProfile(publicUser(data.user));
     return { user: publicUser(data.user) };
   }
 
   async function signup({ name, email, password }) {
+    const cleanName = plainText(name, 20);
     const redirect = encodeURIComponent(`${pageDir()}index.html`);
     const data = await authPost(`/auth/v1/signup?redirect_to=${redirect}`, {
       email,
       password,
-      data: { name, nickname: name, provider: 'email' },
+      data: { name: cleanName, nickname: cleanName, provider: 'email' },
     });
     if (data && data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0 && !data.access_token) {
       fail('이미 가입된 이메일입니다.', 409);
@@ -252,6 +317,7 @@ const Cloud = (() => {
           Math.floor(Date.now() / 1000) + (Number(data.expires_in) || 3600),
         user: data.user,
       });
+      await ensureSignupProfile(publicUser(data.user));
       return { user: publicUser(data.user) };
     }
     try {
@@ -272,6 +338,88 @@ const Cloud = (() => {
       /* ignore */
     }
     save(null);
+    return { ok: true };
+  }
+
+  function isWithdrawnProfile(row) {
+    return String((row && row.status) || '').replace(/\s+/g, '') === '회원탈퇴';
+  }
+
+  async function rejectWithdrawn() {
+    const user = await currentUser();
+    if (!user) return;
+    try {
+      const rows = await rest(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=status`);
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      if (isWithdrawnProfile(row)) {
+        await logout();
+        fail('탈퇴한 계정입니다.', 403);
+      }
+    } catch (err) {
+      if (err && err.status === 403 && /탈퇴/.test(err.message || '')) throw err;
+    }
+  }
+
+  function seoulDate(iso) {
+    const label = formatJoined(iso || new Date().toISOString());
+    return label ? label.replace(/\./g, '-') : null;
+  }
+
+  async function ensureSignupProfile(user) {
+    if (!user || !user.id) return;
+    const joinedOn = seoulDate(user.created_at);
+    const row = {
+      id: user.id,
+      nickname: user.name || null,
+      email: user.email || null,
+      joined_on: joinedOn,
+      plan: 'premium',
+      updated_at: new Date().toISOString(),
+    };
+    if (user.created_at) row.created_at = user.created_at;
+    try {
+      await rest('/rest/v1/profiles?on_conflict=id', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(row),
+      });
+    } catch {
+      try {
+        await rest(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            email: user.email || undefined,
+            joined_on: joinedOn,
+            plan: 'premium',
+            updated_at: row.updated_at,
+          }),
+        });
+      } catch {
+        /* profiles.joined_on 컬럼이 없으면 supabase-profiles-joined.sql 을 실행해야 합니다 */
+      }
+    }
+  }
+
+  async function leaveAccount() {
+    const user = await currentUser();
+    if (!user) fail('로그인이 필요합니다.', 401);
+    try {
+      await rpc('withdraw_account');
+    } catch {
+      try {
+        await rest(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: '회원탈퇴',
+            email: user.email || undefined,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+      } catch {
+        /* status 컬럼이 없으면 supabase-profiles-withdraw.sql 을 실행해야 합니다 */
+      }
+    }
+    await logout();
     return { ok: true };
   }
 
@@ -532,7 +680,8 @@ const Cloud = (() => {
   }
 
   async function getAccount() {
-    const user = await currentUser();
+    const raw = await authUserRecord();
+    const user = publicUser(raw);
     if (!user) return { user: null, account: null, plan: 'premium', payments: [], profile: null };
     let profile = null;
     try {
@@ -541,11 +690,16 @@ const Cloud = (() => {
     } catch {
       profile = null;
     }
+    const created = (raw && raw.created_at) || user.created_at || (profile && profile.created_at) || '';
+    const joined =
+      formatJoined(profile && profile.joined_on) ||
+      formatJoined(created);
     return {
       user,
       account: {
         name: (profile && (profile.nickname || profile.name)) || user.name,
         email: (profile && profile.email) || user.email,
+        joined: joined,
         goal: (profile && (profile.target_exam || profile.goal)) || '',
         targetDate: (profile && profile.target_date) || '',
         subjects: (profile && profile.subjects) || [],
@@ -605,7 +759,7 @@ const Cloud = (() => {
   async function getWrongNotes() {
     const user = await currentUser();
     try {
-      const rows = await rpc('list_wrong_notes');
+      const rows = await userRpc('list_wrong_notes');
       const notes = (Array.isArray(rows) ? rows : []).map(mapWrongNote);
       localStorage.setItem(NOTES_KEY, JSON.stringify(notes));
       return { notes, source: 'supabase', user };
@@ -627,7 +781,7 @@ const Cloud = (() => {
 
   async function saveWrongNote(body) {
     try {
-      await rpc('upsert_wrong_note', {
+      await userRpc('upsert_wrong_note', {
         p_question_id: body.questionId || null,
         p_subjects: body.subject || null,
         p_question_index: Number.isInteger(Number(body.index)) ? Number(body.index) : null,
@@ -656,7 +810,7 @@ const Cloud = (() => {
 
   async function deleteWrongNote(body) {
     try {
-      await rpc('delete_wrong_note', {
+      await userRpc('delete_wrong_note', {
         p_question_id: body.questionId || null,
         p_subjects: body.subject || null,
         p_question_index: Number.isInteger(Number(body.index)) ? Number(body.index) : null,
@@ -827,30 +981,19 @@ const Cloud = (() => {
     const local = readJson(LOG_KEY, {});
     const answers = await loadRemoteAnswers();
     const log = mergeAnswersIntoLog(local, answers);
-    let stats = null;
-    let grades = null;
-    let weakness = null;
-    try {
-      const row = await rpc('get_study_stats');
-      stats = Array.isArray(row) ? row[0] : row;
-    } catch {
-      stats = statsFromLog(log);
-    }
-    try {
-      const rows = await rpc('list_subject_grades');
-      grades = Array.isArray(rows) ? rows : [];
-    } catch {
-      grades = gradesFromLog(log, await questionCounts());
-    }
-    try {
-      const rows = await rpc('list_weakness');
-      weakness = Array.isArray(rows) ? rows : [];
-    } catch {
-      weakness = weaknessFromLog(log);
-    }
-    if (!stats) stats = statsFromLog(log);
-    if (!grades || !grades.length) grades = gradesFromLog(log, await questionCounts());
-    if (!weakness || !weakness.length) weakness = weaknessFromLog(log);
+    const localStats = statsFromLog(log);
+    const localWeakness = weaknessFromLog(log);
+    const [remoteStats, remoteGrades, remoteWeakness] = await Promise.all([
+      userRpc('get_study_stats').catch(() => null),
+      userRpc('list_subject_grades').catch(() => null),
+      userRpc('list_weakness').catch(() => null),
+    ]);
+    let stats = Array.isArray(remoteStats) ? remoteStats[0] : remoteStats;
+    if (!stats || localStats.attempted > (Number(stats.attempted) || 0)) stats = localStats;
+    let grades = Array.isArray(remoteGrades) ? remoteGrades : [];
+    if (!grades.length) grades = gradesFromLog(log, countCache || {});
+    let weakness = Array.isArray(remoteWeakness) ? remoteWeakness : [];
+    if (!weakness.length) weakness = localWeakness;
     return { log, answers, stats, grades, weakness, source: 'supabase' };
   }
 
@@ -884,11 +1027,10 @@ const Cloud = (() => {
     }
 
     const stats = statsFromLog(log);
-    const counts = await questionCounts();
-    const grades = gradesFromLog(log, counts);
+    const grades = gradesFromLog(log, countCache || {});
     const weakness = weaknessFromLog(log);
     try {
-      await rpc('save_study_stats', {
+      await userRpc('save_study_stats', {
         p_attempted: stats.attempted,
         p_correct: stats.correct,
         p_study_days: stats.studyDays,
@@ -899,7 +1041,7 @@ const Cloud = (() => {
       /* ignore */
     }
     try {
-      await rpc('save_subject_grades', {
+      await userRpc('save_subject_grades', {
         p_rows: grades.map((row) => ({
           subjects: row.id,
           title: row.title,
@@ -914,7 +1056,7 @@ const Cloud = (() => {
       /* ignore */
     }
     try {
-      await rpc('save_weakness', {
+      await userRpc('save_weakness', {
         p_rows: weakness.map((row) => ({
           subjects: row.subjectId,
           headline: row.headline,
@@ -930,7 +1072,60 @@ const Cloud = (() => {
     return { log, answers: [], stats, grades, weakness, questions: premiumEntitlements().questions, source: 'supabase' };
   }
 
-  async function askAi(body) {
+  function guestId() {
+    let id = '';
+    try {
+      id = localStorage.getItem(GUEST_KEY) || '';
+    } catch {
+      id = '';
+    }
+    if (/^[a-f0-9-]{32,40}$/i.test(id)) return id;
+    id = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    try {
+      localStorage.setItem(GUEST_KEY, id);
+    } catch {
+      /* ignore */
+    }
+    return id;
+  }
+
+  async function aiOwner() {
+    const user = await currentUser();
+    return user ? `user:${user.id}` : `guest:${guestId()}`;
+  }
+
+  function readAiUsed(owner) {
+    const all = readJson(AI_USED_KEY, {});
+    return Number(all && all[owner]) || 0;
+  }
+
+  function writeAiUsed(owner, used) {
+    const all = readJson(AI_USED_KEY, {}) || {};
+    all[owner] = Math.max(0, Number(used) || 0);
+    try {
+      localStorage.setItem(AI_USED_KEY, JSON.stringify(all));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function aiUsageInfo(used) {
+    const n = Math.max(0, Number(used) || 0);
+    return {
+      used: n,
+      usedPeriod: n,
+      limit: AI_LIMIT,
+      remaining: Math.max(0, AI_LIMIT - n),
+      unlimited: false,
+      periodKind: 'total',
+      periodLabel: AI_LABEL,
+      plan: 'premium',
+    };
+  }
+
+  async function callAskAi(payload) {
     const session = await refreshIfNeeded();
     const token = (session && session.access_token) || SUPABASE_ANON_KEY;
     const res = await fetch(`${SUPABASE_URL}/functions/v1/ask-ai`, {
@@ -940,10 +1135,34 @@ const Cloud = (() => {
         apikey: SUPABASE_ANON_KEY,
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ messages: body.messages || [] }),
+      body: JSON.stringify({ ...payload }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) fail(data.error || data.message || 'AI 응답에 실패했습니다.', res.status);
+    return { res, data };
+  }
+
+  async function getAiUsage() {
+    const owner = await aiOwner();
+    let used = readAiUsed(owner);
+    try {
+      const { res, data } = await callAskAi({ action: 'usage' });
+      if (res.ok && data.usage && Number.isFinite(Number(data.usage.used))) {
+        used = Math.max(used, Number(data.usage.used));
+        writeAiUsed(owner, used);
+      }
+    } catch {
+      /* 서버 집계가 없으면 이 기기 기록만 사용 */
+    }
+    return aiUsageInfo(used);
+  }
+
+  async function askAi(body) {
+    const user = await currentUser();
+    if (!user) fail('로그인 후 이용하세요', 401);
+    const { res, data } = await callAskAi({ messages: body.messages || [] });
+    if (!res.ok) {
+      fail(data.error || data.message || 'AI 응답에 실패했습니다.', res.status);
+    }
     return { answer: data.answer, usage: premiumEntitlements().ai, source: 'supabase' };
   }
 
@@ -964,6 +1183,279 @@ const Cloud = (() => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) fail(translateAuth(data, '비밀번호를 바꾸지 못했습니다.'), res.status);
     return { ok: true };
+  }
+
+  async function requireBoardUser() {
+    const user = await currentUser();
+    if (!user) fail('로그인 후 이용하세요', 401);
+    return user;
+  }
+
+  async function isAdminUser() {
+    const user = await currentUser();
+    if (!user) return false;
+    try {
+      const rows = await rest(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=is_admin`);
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      return !!(row && row.is_admin);
+    } catch {
+      return false;
+    }
+  }
+
+  function noticeApiError(err) {
+    const msg = String((err && err.message) || '');
+    if (/does not exist|schema cache|could not find the table|PGRST205|relation .*notices/i.test(msg)) {
+      fail('공지사항 테이블이 없습니다. supabase-notices.sql을 실행해 주세요.', 503);
+    }
+    if (/row-level security|permission denied|42501/i.test(msg)) {
+      fail('관리자만 공지를 작성·수정·삭제할 수 있습니다.', 403);
+    }
+    throw err;
+  }
+
+  function mapNotice(row) {
+    if (!row || typeof row !== 'object') return null;
+    return {
+      id: row.id,
+      title: row.title || '',
+      content: row.content || '',
+      pinned: !!row.pinned,
+      author_id: row.author_id || null,
+      author_name: row.author_name || '',
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  }
+
+  async function listNotices() {
+    await requireBoardUser();
+    let rows;
+    try {
+      rows = await rest('/rest/v1/notices?select=*&order=pinned.desc,created_at.desc');
+    } catch (err) {
+      noticeApiError(err);
+    }
+    return {
+      notices: (Array.isArray(rows) ? rows : []).map(mapNotice).filter(Boolean),
+      admin: await isAdminUser(),
+    };
+  }
+
+  async function getNotice(id) {
+    await requireBoardUser();
+    let rows;
+    try {
+      rows = await rest(`/rest/v1/notices?id=eq.${encodeURIComponent(id)}&select=*`);
+    } catch (err) {
+      noticeApiError(err);
+    }
+    const notice = mapNotice(Array.isArray(rows) ? rows[0] : rows);
+    if (!notice) fail('공지를 찾을 수 없습니다.', 404);
+    return { notice, admin: await isAdminUser() };
+  }
+
+  async function createNotice(body) {
+    const user = await currentUser();
+    if (!user) fail('로그인이 필요합니다.', 401);
+    if (!(await isAdminUser())) fail('관리자만 공지를 작성할 수 있습니다.', 403);
+    const title = plainText((body && body.title) || '', 80);
+    const content = plainText((body && body.content) || '', 20000);
+    if (!title || !content) fail('제목과 내용을 입력해 주세요.');
+    let rows;
+    try {
+      rows = await rest('/rest/v1/notices', {
+        method: 'POST',
+        body: JSON.stringify({
+          title,
+          content,
+          pinned: !!(body && body.pinned),
+          author_id: user.id,
+          author_name: plainText(user.name || '', 40),
+        }),
+      });
+    } catch (err) {
+      noticeApiError(err);
+    }
+    const notice = mapNotice(Array.isArray(rows) ? rows[0] : rows);
+    return { ok: true, notice, notices: (await listNotices()).notices, admin: true };
+  }
+
+  async function updateNotice(id, body) {
+    const user = await currentUser();
+    if (!user) fail('로그인이 필요합니다.', 401);
+    if (!(await isAdminUser())) fail('관리자만 공지를 수정할 수 있습니다.', 403);
+    const patch = {
+      updated_at: new Date().toISOString(),
+    };
+    if (body && body.title != null) patch.title = plainText(body.title, 80);
+    if (body && body.content != null) patch.content = plainText(body.content, 20000);
+    if (body && body.pinned != null) patch.pinned = !!body.pinned;
+    if (!patch.title && body && body.title != null) fail('제목을 입력해 주세요.');
+    if (!patch.content && body && body.content != null) fail('내용을 입력해 주세요.');
+    let rows;
+    try {
+      rows = await rest(`/rest/v1/notices?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      });
+    } catch (err) {
+      noticeApiError(err);
+    }
+    const notice = mapNotice(Array.isArray(rows) ? rows[0] : rows);
+    if (!notice) fail('공지를 찾을 수 없습니다.', 404);
+    return { ok: true, notice, notices: (await listNotices()).notices, admin: true };
+  }
+
+  async function deleteNotice(id) {
+    const user = await currentUser();
+    if (!user) fail('로그인이 필요합니다.', 401);
+    if (!(await isAdminUser())) fail('관리자만 공지를 삭제할 수 있습니다.', 403);
+    try {
+      await rest(`/rest/v1/notices?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch (err) {
+      noticeApiError(err);
+    }
+    return { ok: true, notices: (await listNotices()).notices, admin: true };
+  }
+
+  function reportApiError(err) {
+    const msg = String((err && err.message) || '');
+    if (/does not exist|schema cache|could not find the table|PGRST205|function .*reports|relation .*reports/i.test(msg)) {
+      fail('오류 신고 테이블이 없습니다. supabase-reports.sql을 실행해 주세요.', 503);
+    }
+    throw err;
+  }
+
+  function mapReportSummary(row) {
+    if (!row || typeof row !== 'object') return null;
+    return {
+      id: row.id,
+      title: row.title || '',
+      created_at: row.created_at,
+      has_answer: !!row.has_answer,
+    };
+  }
+
+  function mapReportDetail(row) {
+    if (!row || typeof row !== 'object') return null;
+    return {
+      ...mapReportSummary(row),
+      content: row.content || '',
+      author_name: row.author_name || '',
+      answer: row.answer || '',
+      answered_at: row.answered_at || null,
+      updated_at: row.updated_at,
+    };
+  }
+
+  async function listReports() {
+    await requireBoardUser();
+    let rows;
+    try {
+      rows = await rpc('list_reports');
+    } catch (err) {
+      reportApiError(err);
+    }
+    const list = Array.isArray(rows) ? rows : [];
+    return {
+      reports: list.map(mapReportSummary).filter(Boolean),
+      admin: await isAdminUser(),
+    };
+  }
+
+  async function createReport(body) {
+    await requireBoardUser();
+    const title = plainText((body && body.title) || '', 80);
+    const content = plainText((body && body.content) || '', 20000);
+    const password = String((body && body.password) || '');
+    if (!title || !content) fail('제목과 내용을 입력해 주세요.');
+    if (password.length < 4) fail('비밀번호는 4자 이상이어야 합니다.');
+    let row;
+    try {
+      row = await rpc('create_report', { p_title: title, p_content: content, p_password: password });
+    } catch (err) {
+      reportApiError(err);
+    }
+    return { ok: true, report: mapReportDetail(row), reports: (await listReports()).reports, admin: await isAdminUser() };
+  }
+
+  async function openReport(id, body) {
+    await requireBoardUser();
+    let row;
+    try {
+      row = await rpc('open_report', {
+        p_id: Number(id),
+        p_password: body && body.password != null ? String(body.password) : '',
+      });
+    } catch (err) {
+      reportApiError(err);
+    }
+    const report = mapReportDetail(row);
+    if (!report) fail('글을 찾을 수 없습니다.', 404);
+    return { report, admin: await isAdminUser() };
+  }
+
+  async function replyReport(id, body) {
+    const user = await currentUser();
+    if (!user) fail('로그인이 필요합니다.', 401);
+    if (!(await isAdminUser())) fail('관리자만 답변할 수 있습니다.', 403);
+    const answer = plainText((body && body.answer) || '', 20000);
+    if (!answer) fail('답변을 입력해 주세요.');
+    let row;
+    try {
+      row = await rpc('reply_report', { p_id: Number(id), p_answer: answer });
+    } catch (err) {
+      reportApiError(err);
+    }
+    return { ok: true, report: mapReportDetail(row), reports: (await listReports()).reports, admin: true };
+  }
+
+  async function deleteReport(id) {
+    const user = await currentUser();
+    if (!user) fail('로그인이 필요합니다.', 401);
+    if (!(await isAdminUser())) fail('관리자만 삭제할 수 있습니다.', 403);
+    try {
+      await rpc('delete_report', { p_id: Number(id) });
+    } catch (err) {
+      reportApiError(err);
+    }
+    return { ok: true, reports: (await listReports()).reports, admin: true };
+  }
+
+  function mapLegalPage(row) {
+    if (!row || typeof row !== 'object') return null;
+    return {
+      slug: row.slug,
+      title: row.title || '',
+      lead: row.lead || '',
+      content: row.content || '',
+      sort_order: Number(row.sort_order) || 0,
+      updated_at: row.updated_at || null,
+    };
+  }
+
+  async function listLegalPages() {
+    let rows;
+    try {
+      rows = await rest('/rest/v1/legal_pages?select=slug,title,lead,content,sort_order,updated_at&order=sort_order.asc', { anon: true });
+    } catch (err) {
+      const msg = String((err && err.message) || '');
+      if (/does not exist|schema cache|could not find the table|PGRST205|relation .*legal_pages/i.test(msg)) {
+        fail('약관 테이블이 없습니다. supabase-legal.sql을 실행해 주세요.', 503);
+      }
+      throw err;
+    }
+    return { pages: (Array.isArray(rows) ? rows : []).map(mapLegalPage).filter(Boolean) };
+  }
+
+  async function getLegalPage(slug) {
+    const key = String(slug || '').toLowerCase();
+    if (!/^(terms|privacy|support)$/.test(key)) fail('항목을 찾을 수 없습니다.', 404);
+    const data = await listLegalPages();
+    const page = (data.pages || []).find((item) => item.slug === key);
+    if (!page) fail('항목을 찾을 수 없습니다.', 404);
+    return { page };
   }
 
   async function request(path, options = {}) {
@@ -989,8 +1481,13 @@ const Cloud = (() => {
     if (pathname === '/api/auth/find-id' && method === 'POST') return findId(body);
     if (pathname === '/api/subjects' && method === 'GET') return listSubjects();
     if (pathname === '/api/questions' && method === 'GET') return listQuestions(search);
-    if (pathname === '/api/entitlements' && method === 'GET') return premiumEntitlements();
-    if (pathname === '/api/ai-usage' && method === 'GET') return { usage: premiumEntitlements().ai, source: 'supabase' };
+    if (pathname === '/api/entitlements' && method === 'GET') {
+      const pack = premiumEntitlements();
+      return FREE_PERIOD ? { ...pack, ai: await getAiUsage() } : pack;
+    }
+    if (pathname === '/api/ai-usage' && method === 'GET') {
+      return { usage: FREE_PERIOD ? await getAiUsage() : premiumEntitlements().ai, source: 'supabase' };
+    }
     if (pathname === '/api/account' && method === 'GET') return getAccount();
     if (pathname === '/api/account' && method === 'PUT') return saveAccount(body);
     if (pathname === '/api/account/password' && method === 'POST') return changePassword(body);
@@ -1003,8 +1500,28 @@ const Cloud = (() => {
     if (pathname === '/api/billing/plan' && method === 'PUT') return { plan: 'premium' };
     if (pathname === '/api/billing/payments' && method === 'POST') return { ok: true };
     if (pathname === '/api/account/leave' && method === 'POST') {
-      await logout();
-      return { ok: true };
+      return leaveAccount();
+    }
+    if (pathname === '/api/legal' && method === 'GET') return listLegalPages();
+    const legalMatch = pathname.match(/^\/api\/legal\/([^/]+)$/);
+    if (legalMatch && method === 'GET') return getLegalPage(legalMatch[1]);
+    const noticeMatch = pathname.match(/^\/api\/notices(?:\/([^/]+))?$/);
+    if (noticeMatch) {
+      if (method === 'GET' && !noticeMatch[1]) return listNotices();
+      if (method === 'GET') return getNotice(noticeMatch[1]);
+      if (method === 'POST' && !noticeMatch[1]) return createNotice(body);
+      if ((method === 'PUT' || method === 'PATCH') && noticeMatch[1]) return updateNotice(noticeMatch[1], body);
+      if (method === 'DELETE' && noticeMatch[1]) return deleteNotice(noticeMatch[1]);
+    }
+    const reportMatch = pathname.match(/^\/api\/reports(?:\/([^/]+)(?:\/(open|reply))?)?$/);
+    if (reportMatch) {
+      const reportId = reportMatch[1];
+      const action = reportMatch[2];
+      if (method === 'GET' && !reportId) return listReports();
+      if (method === 'POST' && !reportId) return createReport(body);
+      if (method === 'POST' && reportId && action === 'open') return openReport(reportId, body);
+      if (method === 'POST' && reportId && action === 'reply') return replyReport(reportId, body);
+      if (method === 'DELETE' && reportId && !action) return deleteReport(reportId);
     }
     fail('지원하지 않는 요청입니다.', 404);
   }

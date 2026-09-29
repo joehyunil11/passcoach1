@@ -1,7 +1,75 @@
-/* file:// 로 열어도 화면은 보이게 두고,
-   로컬 서버가 켜지는 즉시 http://127.0.0.1:5501 으로 옮깁니다. */
+/* XSS 방어 헬퍼 + file:// 에서 로컬 서버로 이동 */
+
 (() => {
   'use strict';
+
+  function escapeHtml(str) {
+    return String(str == null ? '' : str).replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch]));
+  }
+
+  function stripTags(str) {
+    return String(str == null ? '' : str)
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(/<\/?[a-zA-Z][^>]*>/g, '')
+      .replace(/javascript\s*:/gi, '')
+      .replace(/vbscript\s*:/gi, '')
+      .replace(/on[a-z]+\s*=/gi, '');
+  }
+
+  function isDangerousUrl(value) {
+    const lower = String(value || '').trim().toLowerCase();
+    return (
+      lower.startsWith('javascript:') ||
+      lower.startsWith('vbscript:') ||
+      lower.startsWith('data:') ||
+      lower.startsWith('file:') ||
+      lower.startsWith('//')
+    );
+  }
+
+  function safeHref(value) {
+    const s = String(value || '').trim();
+    if (!s || isDangerousUrl(s)) return '';
+    if (s.startsWith('#') || s.startsWith('?')) return s;
+    if (s.startsWith('/') && !s.startsWith('//')) return s;
+    if (/^[a-z0-9][a-z0-9._\-]*\.html(?:[?#].*)?$/i.test(s)) return s;
+    try {
+      const u = new URL(s, location.href);
+      if ((u.protocol === 'http:' || u.protocol === 'https:') && u.origin === location.origin) return s;
+    } catch (_) {
+      /* ignore */
+    }
+    return '';
+  }
+
+  function safeImageUrl(value) {
+    const s = String(value || '').trim();
+    if (!s || isDangerousUrl(s)) return '';
+    if (s.startsWith('/api/question-image?')) return s;
+    if (s.startsWith('/') && !s.startsWith('//')) return s;
+    try {
+      const u = new URL(s, location.href);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      const host = u.hostname.toLowerCase();
+      if (host === location.hostname || host === '127.0.0.1' || host === 'localhost' || host.endsWith('.supabase.co')) {
+        return s;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    return '';
+  }
+
+  window.PasscoachXss = { escapeHtml, stripTags, safeHref, safeImageUrl };
+
+  window.PasscoachConfig = { freePeriod: false, aiLimit: 100, aiLabel: '무료 이용기간' };
+
   if (location.protocol !== 'file:') return;
 
   const file = decodeURIComponent((location.pathname.split(/[/\\]/).pop() || 'index.html'));
@@ -25,7 +93,6 @@
     location.replace(next);
   }
 
-  /* 서버가 아직 뜨지 않았으면 조용히 계속 기다렸다가 켜지는 순간 자동 이동 */
   function probe() {
     if (moving) return;
     const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;

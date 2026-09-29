@@ -1,0 +1,342 @@
+/* 오류 신고 게시판 */
+
+.main.main--report {
+  overflow: hidden;
+}
+
+.report {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 10px;
+  min-height: 0;
+  height: 100%;
+  padding: 14px 18px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.report__head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+}
+
+.report__mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.report__mark svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.report__sub {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.report__panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.report__panel[hidden] { display: none !important; }
+
+.report__list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.report__headrow,
+.report__item {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 72px 110px;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 13px 16px;
+  text-align: left;
+}
+
+.report__headrow {
+  flex: none;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--line);
+  background: #f6f8fc;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.report__headrow span:first-child,
+.report__item-flag { text-align: center; }
+.report__headrow span:nth-child(3) { text-align: center; }
+.report__headrow span:last-child { text-align: right; }
+
+.report__item {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+}
+.report__item:last-child { border-bottom: 0; }
+.report__item:hover { background: #f8fbff; }
+
+.report__item-flag {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.report__item-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report__item-status {
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+.report__item-status.is-wait { color: #c2410c; }
+.report__item-status.is-done { color: var(--primary); }
+
+.report__item-date {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.report__empty {
+  padding: 36px 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.report__detail {
+  gap: 8px;
+  overflow: auto;
+}
+
+.report__detail-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 6px;
+}
+
+.report__badge {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+.report__badge.is-wait {
+  background: #fff4e8;
+  color: #c2410c;
+}
+
+.report__detail-title {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+  line-height: 1.3;
+}
+
+.report__meta {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.report__body {
+  margin-top: 2px;
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--line);
+  color: var(--text);
+  font-size: 15.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.report__answer {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.report__answer-title {
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+.report__answer .report__body {
+  margin-top: 6px;
+  padding: 8px 0 0;
+  border-top: 0;
+}
+
+.report__reply {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 6px;
+  margin-top: 2px;
+}
+.report__reply label {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.report__admin {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.report__hint {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.field {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+.field--area {
+  height: auto;
+  min-height: 140px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.field--write {
+  min-height: 88px;
+  max-height: 88px;
+  resize: none;
+}
+.field--reply {
+  min-height: 72px;
+  max-height: 88px;
+  resize: none;
+}
+
+.btn--danger {
+  background: #fdeeee;
+  color: var(--red);
+}
+.btn--danger:hover { background: #f8d4d4; }
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(16, 21, 31, .45);
+}
+.dialog[hidden] { display: none !important; }
+.dialog__panel {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 32px);
+  padding: 16px 18px 14px;
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.dialog__title { font-size: 16px; font-weight: 800; }
+.dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+.dialog__body label {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  flex: none;
+  gap: 8px;
+}
+
+#writeDialog .field:not(.field--area) {
+  height: 36px;
+}
+
+@media (max-width: 720px) {
+  .report__headrow,
+  .report__item {
+    grid-template-columns: 48px minmax(0, 1fr) 72px;
+  }
+  .report__headrow span:last-child,
+  .report__item-date {
+    display: none;
+  }
+}

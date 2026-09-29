@@ -8,7 +8,7 @@
 <script src="js/cloud.js?v=20260928i"></script>
 <script src="js/data.js"></script>
 <script src="js/shell.js?v=20260928m"></script>
-<title>이용권 / 결제 · 공무원 AI</title>
+<title>공지사항 · 공무원 AI</title>
 <meta name="theme-color" content="#2563eb" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
 <style>
@@ -18,17 +18,17 @@
   .topbar{position:fixed;top:0;left:0;right:0;height:52px;z-index:40;view-transition-name:shell-topbar}
   .layout{display:grid;grid-template-columns:252px minmax(0,1fr);width:100%;height:calc(100% - 52px);margin-top:52px;overflow:hidden}
   .sidebar{width:252px;min-width:252px;max-width:252px;view-transition-name:shell-sidebar}
-  .main{height:100%;min-width:0;overflow:hidden}
+  .main{height:100%;min-width:0;overflow-x:hidden;overflow-y:scroll;scrollbar-gutter:stable}
 </style>
 <link rel="stylesheet" href="css/base.css" />
 <link rel="stylesheet" href="css/shell.css?v=20260928i" />
-<link rel="stylesheet" href="css/billing.css" />
+<link rel="stylesheet" href="css/notice.css?v=20260923" />
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'" />
 <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" /></noscript>
 </head>
-<body data-active-nav="billing">
-<a class="skip-link" href="#billing">이용권으로 건너뛰기</a>
+<body data-active-nav="notice">
+<a class="skip-link" href="#noticeBoard">공지사항으로 건너뛰기</a>
 
 <header class="topbar">
   <button class="topbar__menu" type="button" id="sidebarToggle" aria-label="메뉴 열기" aria-expanded="false" aria-controls="sidebar">
@@ -37,7 +37,7 @@
   <span class="topbar__dot" aria-hidden="true">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="3.4" /><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" /></svg>
   </span>
-  <h1 class="topbar__title">이용권 / 결제</h1>
+  <h1 class="topbar__title">공지사항</h1>
   <div class="topbar__spacer"></div>
   <div class="topbar__auth" id="topbarAuth"></div>
   <button class="topbar__icon" type="button" data-action="알림" aria-label="알림">
@@ -61,73 +61,76 @@
 
     <nav class="nav" aria-label="학습 메뉴">
       <script>
-        document.write(Shell.navMarkup('billing'));
-        Shell.boot('billing');
+        document.write(Shell.navMarkup('notice'));
+        Shell.boot('notice');
       </script>
     </nav>
 
     <div class="sidebar__foot">
-      <button class="nav__link nav__link--quiet" type="button" data-action="로그아웃">
+      <button class="nav__link nav__link--quiet" type="button" data-logout="true">
         <svg class="nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5H15" /><path d="M10 8l-4 4 4 4M6 12h9" /></svg>
         <span>로그아웃</span>
       </button>
     </div>
   </aside>
 
-  <main class="main main--billing">
-    <section class="billing" id="billing" aria-labelledby="billingTitle">
-      <header class="billing__head">
-        <h2 class="billing__title" id="billingTitle">
-          <span class="billing__mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><rect x="4" y="5.5" width="16" height="13" rx="2.2"/><path d="M4 10h16M8 14.2h3"/></svg>
-          </span>
-          이용권 / 결제
-        </h2>
+  <main class="main">
+    <section class="notice" id="noticeBoard" aria-labelledby="noticeTitle">
+      <header class="notice__head">
+        <div>
+          <h2 class="notice__title" id="noticeTitle">
+            <span class="notice__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 10.5v3a1.5 1.5 0 0 0 1.5 1.5H8l7 4.5V6L8 10.5H5.5A1.5 1.5 0 0 0 4 12Z"/><path d="M18 9.5a4 4 0 0 1 0 5"/></svg>
+            </span>
+            공지사항
+          </h2>
+          <p class="notice__sub" id="noticeSub">서비스 안내와 공지를 확인할 수 있습니다.</p>
+        </div>
+        <button class="btn btn--primary btn--sm" type="button" id="writeBtn" hidden>글쓰기</button>
       </header>
 
-      <div class="billing__tabs" role="tablist" aria-label="이용권 메뉴">
-        <button class="billing__tab is-active" type="button" role="tab" id="tabPlans" aria-selected="true" aria-controls="panelPlans">이용권 구매</button>
-        <button class="billing__tab" type="button" role="tab" id="tabHistory" aria-selected="false" aria-controls="panelHistory">결제 내역</button>
+      <div class="notice__panel" id="listPanel">
+        <ul class="notice__list" id="noticeList"></ul>
       </div>
 
-      <div class="billing__panel" id="panelPlans" role="tabpanel" aria-labelledby="tabPlans">
-        <div class="plans" id="planGrid"></div>
-      </div>
-
-      <div class="billing__panel" id="panelHistory" role="tabpanel" aria-labelledby="tabHistory" hidden>
-        <div class="pay-table-wrap">
-          <table class="pay-table">
-            <thead>
-              <tr>
-                <th scope="col">결제일</th>
-                <th scope="col">이용권</th>
-                <th scope="col">금액</th>
-                <th scope="col">상태</th>
-              </tr>
-            </thead>
-            <tbody id="payBody"></tbody>
-          </table>
+      <article class="notice__panel notice__detail" id="detailPanel" hidden>
+        <button class="btn btn--soft btn--sm" type="button" id="backBtn">목록으로</button>
+        <p class="notice__badge" id="detailPin" hidden>고정</p>
+        <h3 class="notice__detail-title" id="detailTitle"></h3>
+        <p class="notice__meta" id="detailMeta"></p>
+        <div class="notice__body" id="detailBody"></div>
+        <div class="notice__admin" id="detailAdmin" hidden>
+          <button class="btn btn--outline btn--sm" type="button" id="editBtn">수정</button>
+          <button class="btn btn--danger btn--sm" type="button" id="deleteBtn">삭제</button>
         </div>
-      </div>
+      </article>
     </section>
   </main>
 </div>
 
-<div class="paybox" id="payBox" hidden>
-  <div class="paybox__panel" role="dialog" aria-labelledby="payTitle" aria-modal="true">
-    <h3 class="paybox__title" id="payTitle">이용권 구매</h3>
-    <p class="paybox__lead" id="payLead"></p>
-    <p class="paybox__hint">지금은 화면 확인용 결제입니다. 실제 카드 결제는 되지 않습니다.</p>
-    <div class="paybox__actions">
-      <button class="btn btn--outline" type="button" id="payCancel">취소</button>
-      <button class="btn btn--primary" type="button" id="payConfirm">결제하기</button>
+<div class="dialog" id="dialog" hidden>
+  <form class="dialog__panel" id="dialogForm">
+    <h3 class="dialog__title" id="dialogTitle">공지 작성</h3>
+    <div class="dialog__body">
+      <label for="noticeTitleInput">제목</label>
+      <input class="field" id="noticeTitleInput" name="title" maxlength="80" required />
+      <label for="noticeContentInput">내용</label>
+      <textarea class="field field--area" id="noticeContentInput" name="content" rows="10" required></textarea>
+      <label class="notice__pin">
+        <input type="checkbox" id="noticePinnedInput" name="pinned" />
+        상단 고정
+      </label>
     </div>
-  </div>
+    <div class="dialog__actions">
+      <button class="btn btn--outline" type="button" id="dialogCancel">취소</button>
+      <button class="btn btn--primary" type="submit">저장</button>
+    </div>
+  </form>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/api.js?v=20260928i"></script>
-<script src="js/billing.js"></script>
+<script src="js/notice.js?v=20260928j"></script>
 </body>
 </html>

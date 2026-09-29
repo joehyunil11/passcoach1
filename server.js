@@ -54,11 +54,46 @@ const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3Mi
 
 function json(res, status, payload) {
   res.statusCode = status;
+  setSecurityHeaders(res);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.end(JSON.stringify(payload));
+}
+
+function sanitizePlainText(value, maxLen) {
+  let s = String(value == null ? '' : value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/vbscript\s*:/gi, '')
+    .replace(/on[a-z]+\s*=/gi, '');
+  if (Number.isInteger(maxLen) && maxLen > 0) s = s.slice(0, maxLen);
+  return s.trim();
+}
+
+const CSP_VALUE = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+  "font-src 'self' https://cdn.jsdelivr.net data:",
+  "img-src 'self' data: blob: https://*.supabase.co",
+  "connect-src 'self' https://*.supabase.co https://api.openai.com",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+function setSecurityHeaders(res) {
+  if (res.getHeader && res.getHeader('Content-Security-Policy')) return;
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', CSP_VALUE);
 }
 
 function supabaseConfig() {
@@ -627,43 +662,20 @@ async function fetchQuestionsFromSupabase(subjects) {
   );
 }
 
+let questionIndexCache = { at: 0, maps: null, counts: {} };
+const QUESTION_INDEX_TTL_MS = 15 * 60 * 1000;
+
+function cachedQuestionCounts() {
+  return questionIndexCache.counts && typeof questionIndexCache.counts === 'object'
+    ? questionIndexCache.counts
+    : {};
+}
+
 async function fetchQuestionCounts() {
-  const cfg = supabaseConfig();
-  if (!cfg) return {};
-  const supabase = makeSupabase(cfg);
-  let subjectRows = [];
-  try {
-    const { data, error } = await supabase.from('subjects').select('id,name,code').order('id', { ascending: true });
-    if (!error) subjectRows = Array.isArray(data) ? data : [];
-  } catch (_) {
-    subjectRows = [];
-  }
-
-  let all = [];
-  try {
-    all = await fetchSupabasePages(() => supabase.from('questions').select('id,subjects').order('id', { ascending: true }));
-  } catch (err) {
-    throw new Error(err.message || '문제 수 조회에 실패했습니다.');
-  }
-  const counts = {};
-
-  all.forEach((row) => {
-    const raw = rowSubject(row);
-    let code = resolveSubjectCode(raw);
-    if (!code) {
-      const hit = subjectRows.find(
-        (item) =>
-          String(item.id) === raw ||
-          String(item.name || '').trim() === raw ||
-          String(item.code || '').trim() === raw
-      );
-      if (hit) code = resolveSubjectCode(hit.name) || resolveSubjectCode(hit.code);
-    }
-    if (!code) return;
-    counts[code] = (counts[code] || 0) + 1;
-  });
-
-  return counts;
+  const cached = cachedQuestionCounts();
+  if (Object.keys(cached).length) return { ...cached };
+  await questionIndexMaps();
+  return { ...cachedQuestionCounts() };
 }
 
 function provider() {
@@ -816,6 +828,7 @@ function readBody(req, limit) {
 const oauthStates = new Map();
 
 function redirect(res, location) {
+  setSecurityHeaders(res);
   res.statusCode = 302;
   res.setHeader('Location', location);
   res.end();
@@ -1002,8 +1015,16 @@ async function startAuthSession(res, session, user) {
   const publicInfo = publicUserFromAuth(user);
   ensureLocalAccount(publicInfo.email, publicInfo.name);
   try {
-    await ensureAuthProfile(session.access_token, user);
-  } catch {
+    const row = await ensureAuthProfile(session.access_token, user);
+    if (isWithdrawnProfile(row)) {
+      await signOutAuth(session.access_token);
+      Store.clearAuthCookies(res);
+      const err = new Error('탈퇴한 계정입니다.');
+      err.status = 403;
+      throw err;
+    }
+  } catch (err) {
+    if (err && err.status === 403) throw err;
     /* profiles RLS/FK 가 아직이면 로컬 계정만 유지 */
   }
   return publicInfo;
@@ -1086,7 +1107,11 @@ function isPublicApi(url) {
     url === '/api/health' ||
     url === '/api/session' ||
     url === '/api/subjects' ||
+    url === '/api/questions' ||
+    url === '/api/question-image' ||
     url === '/api/entitlements' ||
+    url === '/api/legal' ||
+    url.startsWith('/api/legal/') ||
     url.startsWith('/api/auth/')
   );
 }
@@ -1097,7 +1122,8 @@ function isPublicHtml(file) {
     file === '/login.html' ||
     file === '/signup.html' ||
     file === '/find-account.html' ||
-    file === '/reset-password.html'
+    file === '/reset-password.html' ||
+    file === '/quiz.html'
   );
 }
 
@@ -1108,7 +1134,7 @@ async function ensureAuthProfile(accessToken, user) {
     (user.user_metadata && (user.user_metadata.name || user.user_metadata.nickname)) ||
     user.name ||
     '';
-  const { data: existing, error: readError } = await supabase
+  let { data: existing, error: readError } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', user.id)
@@ -1118,8 +1144,23 @@ async function ensureAuthProfile(accessToken, user) {
     throw profileTableError(readError);
   }
   if (existing) {
-    if (!existing.email && user.email) {
-      await supabase.from('profiles').update({ email: user.email }).eq('id', user.id);
+    const patch = {};
+    if (name && !existing.nickname) patch.nickname = name;
+    if (existing.plan !== 'premium') patch.plan = 'premium';
+    if (!existing.joined_on && user.created_at) {
+      const d = new Date(user.created_at);
+      if (!Number.isNaN(d.getTime())) {
+        patch.joined_on = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Seoul',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(d);
+      }
+    }
+    if (Object.keys(patch).length) {
+      await supabase.from('profiles').update(patch).eq('id', user.id);
+      return { ...existing, ...patch };
     }
     return existing;
   }
@@ -1127,9 +1168,22 @@ async function ensureAuthProfile(accessToken, user) {
     id: user.id,
     email: user.email || null,
     nickname: name || null,
-    plan: 'free',
+    plan: 'premium',
+    created_at: user.created_at || new Date().toISOString(),
+    joined_on: user.created_at
+      ? new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Seoul',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date(user.created_at))
+      : undefined,
   });
   return inserted;
+}
+
+function isWithdrawnProfile(row) {
+  return String((row && row.status) || '').replace(/\s+/g, '') === '회원탈퇴';
 }
 
 function profileTableError(error) {
@@ -1159,9 +1213,10 @@ function profilePayload(row, user) {
     id: row.id,
     nickname: row.nickname,
     email: (user && user.email) || row.email || null,
+    joined_on: row.joined_on || null,
     target_exam: row.target_exam,
     target_date: row.target_date,
-    plan: row.plan || 'free',
+    plan: 'premium',
     subjects: profileSubjects(row.subjects),
     daily_target: Number(row.daily_target) > 0 ? Number(row.daily_target) : 30,
     notify: profileNotify(row.notify),
@@ -1180,9 +1235,10 @@ async function writeAuthProfile(supabase, row) {
     const core = {
       id: row.id,
       nickname: row.nickname,
+      email: row.email,
       target_exam: row.target_exam,
       target_date: row.target_date,
-      plan: row.plan || 'free',
+      plan: row.plan || 'premium',
     };
     ({ data, error } = await supabase.from('profiles').upsert(core, { onConflict: 'id' }).select('*').maybeSingle());
   }
@@ -1220,7 +1276,7 @@ async function upsertAuthProfile(accessToken, user, fields) {
     nickname: fields.nickname !== undefined ? fields.nickname : prev.nickname || user.name || null,
     target_exam: fields.target_exam !== undefined ? fields.target_exam : prev.target_exam || null,
     target_date: fields.target_date !== undefined ? fields.target_date : prev.target_date || null,
-    plan: fields.plan || prev.plan || 'free',
+    plan: 'premium',
     subjects: Array.isArray(fields.subjects) ? fields.subjects : profileSubjects(prev.subjects),
     daily_target: fields.daily_target != null ? fields.daily_target : prev.daily_target || 30,
     notify: fields.notify ? profileNotify(fields.notify) : profileNotify(prev.notify),
@@ -1278,7 +1334,10 @@ async function saveAuthAnswer(accessToken, userId, fields) {
     })
     .select('*')
     .maybeSingle();
-  if (error) return null;
+  if (error) {
+    console.warn('user_answers insert', error.message || error);
+    return null;
+  }
   return data;
 }
 
@@ -1354,35 +1413,49 @@ function statsFromAttempts(attempts) {
   };
 }
 
-async function collectStudyAttempts(studyLog, answers) {
+function collectStudyAttempts(studyLog, answers) {
   const map = new Map();
   Object.entries(studyLog || {}).forEach(([subject, byIndex]) => {
     Object.entries(byIndex || {}).forEach(([index, item]) => {
       if (!item) return;
-      map.set(`${subject}:${index}`, {
+      const qid = Number(item.questionId);
+      const key = Number.isFinite(qid) && qid > 0 ? `q:${qid}` : `${subject}:${index}`;
+      map.set(key, {
         correct: !!item.correct,
         date: item.date || new Date().toISOString(),
       });
     });
   });
-  const rows = Array.isArray(answers) ? answers : [];
-  if (rows.length) {
-    const indexMaps = await questionIndexMaps();
-    const questionMap = await questionsByIds(rows.map((row) => row.question_id));
-    rows.forEach((row) => {
-      const q = questionMap.get(Number(row.question_id)) || {};
-      const subject =
-        resolveSubjectCode(rowSubject(q)) || resolveSubjectCode(row.subjects) || 'unknown';
-      const indexMap = indexMaps.get(subject);
-      const index = indexMap ? indexMap.get(Number(row.question_id)) : undefined;
-      const key = Number.isInteger(index) ? `${subject}:${index}` : `q:${row.question_id}`;
-      map.set(key, {
-        correct: !!row.is_correct,
-        date: row.answered_at || row.date || new Date().toISOString(),
-      });
+  if (map.size) return [...map.values()];
+  (Array.isArray(answers) ? answers : []).forEach((row) => {
+    const id = Number(row.question_id);
+    const key = Number.isFinite(id) && id > 0 ? `q:${id}` : `row:${map.size}`;
+    map.set(key, {
+      correct: !!row.is_correct,
+      date: row.answered_at || row.date || new Date().toISOString(),
     });
-  }
+  });
   return [...map.values()];
+}
+
+function mergeLogWithAnswers(log, answers) {
+  const next = { ...(log || {}) };
+  (Array.isArray(answers) ? answers : []).forEach((row) => {
+    const subject =
+      resolveSubjectCode(row.subjects) ||
+      resolveSubjectCode(rowSubject(row)) ||
+      '';
+    if (!subject) return;
+    if (!next[subject]) next[subject] = {};
+    const key = Number(row.question_id) > 0 ? `id:${row.question_id}` : String(Object.keys(next[subject]).length);
+    next[subject][key] = {
+      topic: row.type || '',
+      correct: !!row.is_correct,
+      date: row.answered_at || new Date().toISOString(),
+      questionId: row.question_id || null,
+    };
+  });
+  return next;
 }
 
 function mapStudyStatsRow(row) {
@@ -1408,6 +1481,9 @@ function studyStatsClient(accessToken) {
 const PLAN_IDS = new Set(['free', 'basic', 'premium']);
 /* 제한을 다시 켤 때까지 무료·베이직·프리미엄을 모두 프리미엄으로 취급. 끄려면 '' 로 두세요. */
 const PLAN_UNLOCK = 'premium';
+const FREE_PERIOD = false;
+const FREE_AI_LIMIT = 100;
+const FREE_PERIOD_START = '2026-01-01';
 
 function normalizePlanId(plan) {
   const id = String(plan || 'free').toLowerCase();
@@ -1446,6 +1522,7 @@ function planEntitlements(plan) {
 }
 
 function aiQuota(plan) {
+  if (FREE_PERIOD) return { limit: FREE_AI_LIMIT, kind: 'total', label: '무료 이용기간' };
   return planEntitlements(plan).ai;
 }
 
@@ -1454,6 +1531,7 @@ function questionQuota(plan) {
 }
 
 function aiPeriodStart(kind) {
+  if (kind === 'total') return FREE_PERIOD_START;
   const today = dayKeySeoul(new Date());
   if (kind === 'month') return `${today.slice(0, 7)}-01`;
   return today;
@@ -1561,19 +1639,42 @@ async function saveAiUsageRemote(client, usage) {
   return rpc.data || null;
 }
 
+function localAiOwner(ctx) {
+  if (ctx && ctx.user && (ctx.user.id || ctx.user.email)) return `user:${String(ctx.user.id || ctx.user.email).toLowerCase()}`;
+  return ctx && ctx.guestKey ? `guest:${ctx.guestKey}` : '';
+}
+
+function readLocalAiUsage(ctx, plan) {
+  const owner = localAiOwner(ctx);
+  const store = Store.load();
+  const row = owner && store.aiUsage ? store.aiUsage[owner] : null;
+  return mapAiUsageRow(row, plan);
+}
+
+function writeLocalAiUsage(ctx, usage) {
+  const owner = localAiOwner(ctx);
+  if (!owner) return;
+  const store = Store.load();
+  store.aiUsage = store.aiUsage || {};
+  store.aiUsage[owner] = {
+    used: Number(usage.used) || 0,
+    used_period: Number(usage.usedPeriod) || 0,
+    period_start: usage.periodStart || null,
+    period_kind: usage.periodKind || 'day',
+  };
+  Store.save(store);
+}
+
 async function loadAiUsage(ctx) {
   const hint = 'Supabase SQL 편집기에서 supabase-ai-usage.sql 파일을 실행해 주세요.';
   const plan = await resolvePlanId(ctx);
-  const empty = mapAiUsageRow(null, plan);
-  const client = studyStatsClient(ctx && ctx.accessToken);
-  if (!client) return { usage: empty, source: 'local', hint, plan };
+  if (!(ctx && ctx.accessToken)) {
+    /* 비회원(또는 레거시 세션)은 공용 행을 쓰지 않고 쿠키별로 따로 센다 */
+    return { usage: readLocalAiUsage(ctx, plan), source: 'local', plan };
+  }
+  const client = studyStatsClient(ctx.accessToken);
+  if (!client) return { usage: readLocalAiUsage(ctx, plan), source: 'local', hint, plan };
   try {
-    if (ctx.accessToken) {
-      const claimed = await client.rpc('claim_guest_ai_usage');
-      if (claimed.error && !isMissingWrongNotesFn(claimed.error)) {
-        console.warn('ai_usage claim', claimed.error.message);
-      }
-    }
     const row = await getAiUsageRemote(client);
     const usage = mapAiUsageRow(row, plan);
     if (!row || String(row.period_start || '').slice(0, 10) !== usage.periodStart) {
@@ -1583,7 +1684,7 @@ async function loadAiUsage(ctx) {
   } catch (err) {
     if (!isMissingWrongNotesFn(err)) console.warn('ai_usage load', err.message || err);
     return {
-      usage: empty,
+      usage: readLocalAiUsage(ctx, plan),
       source: 'local',
       plan,
       hint: isMissingWrongNotesFn(err) ? hint : err.message || hint,
@@ -1603,7 +1704,10 @@ async function bumpAiUsage(ctx) {
       await saveAiUsageRemote(client, usage);
     } catch (err) {
       if (!isMissingWrongNotesFn(err)) console.warn('ai_usage bump', err.message || err);
+      writeLocalAiUsage(ctx, usage);
     }
+  } else {
+    writeLocalAiUsage(ctx, usage);
   }
   return { ...loaded, usage };
 }
@@ -1626,6 +1730,43 @@ async function saveQuestionUsageRemote(client, usage) {
   });
   if (rpc.error) throw rpc.error;
   return rpc.data || null;
+}
+
+function userStudyId(ctx) {
+  return (ctx && ctx.user && ctx.user.id) || '';
+}
+
+function readStudyLogFor(ctx) {
+  const store = Store.load();
+  const uid = userStudyId(ctx);
+  if (uid && store.studyLogsByUser && store.studyLogsByUser[uid] && typeof store.studyLogsByUser[uid] === 'object') {
+    return store.studyLogsByUser[uid];
+  }
+  return store.studyLog || {};
+}
+
+function writeStudyLogEntry(ctx, subject, index, item) {
+  const store = Store.load();
+  if (!store.studyLog || typeof store.studyLog !== 'object') store.studyLog = {};
+  if (!store.studyLog[subject]) store.studyLog[subject] = {};
+  store.studyLog[subject][index] = item;
+  const uid = userStudyId(ctx);
+  if (uid) {
+    if (!store.studyLogsByUser || typeof store.studyLogsByUser !== 'object') store.studyLogsByUser = {};
+    if (!store.studyLogsByUser[uid]) store.studyLogsByUser[uid] = {};
+    if (!store.studyLogsByUser[uid][subject]) store.studyLogsByUser[uid][subject] = {};
+    store.studyLogsByUser[uid][subject][index] = item;
+  }
+  Store.save(store);
+  return store;
+}
+
+function persistStudySnapshot(ctx, studyLog, answers) {
+  Promise.all([
+    syncStudyStats(ctx, studyLog, answers, { force: true }),
+    syncSubjectGrades(ctx, studyLog, answers, { force: true }),
+    syncWeakness(ctx, studyLog, answers, { force: true }),
+  ]).catch((err) => console.warn('study snapshot', err && err.message));
 }
 
 function readLocalQuestionUsage(plan) {
@@ -1653,12 +1794,6 @@ async function loadQuestionUsage(ctx) {
   const client = studyStatsClient(ctx && ctx.accessToken);
   if (!client) return { usage: local, source: 'local', hint, plan };
   try {
-    if (ctx.accessToken) {
-      const claimed = await client.rpc('claim_guest_question_usage');
-      if (claimed.error && !isMissingWrongNotesFn(claimed.error)) {
-        console.warn('question_usage claim', claimed.error.message);
-      }
-    }
     const row = await getQuestionUsageRemote(client);
     const usage = mapQuestionUsageRow(row, plan);
     if (!row || String(row.period_start || '').slice(0, 10) !== usage.periodStart) {
@@ -1749,7 +1884,7 @@ async function saveStudyStatsRemote(client, stats) {
 }
 
 async function computeStudyStats(studyLog, answers) {
-  const attempts = await collectStudyAttempts(studyLog, answers);
+  const attempts = collectStudyAttempts(studyLog, answers);
   return statsFromAttempts(attempts);
 }
 
@@ -1760,10 +1895,7 @@ async function syncStudyStats(ctx, studyLog, answers, options = {}) {
   if (!client) return { stats: local, source: 'local', hint };
   try {
     if (ctx.accessToken) {
-      const claimed = await client.rpc('claim_guest_study_stats');
-      if (claimed.error && !isMissingWrongNotesFn(claimed.error)) {
-        console.warn('study_stats claim', claimed.error.message);
-      }
+      /* 로그인 회원의 기록을 매번 비회원 공용 행과 합치지 않습니다. */
     }
     let remote = await getStudyStatsRemote(client);
     const localAhead =
@@ -1834,46 +1966,37 @@ function gradesScore(rows) {
   );
 }
 
-async function collectSubjectProgress(studyLog, answers) {
-  const map = new Map();
+function collectSubjectProgress(studyLog, answers) {
+  const bySubject = new Map();
+  const bump = (id, correct) => {
+    if (!id) return;
+    const cur = bySubject.get(id) || { attempted: 0, correct: 0 };
+    cur.attempted += 1;
+    if (correct) cur.correct += 1;
+    bySubject.set(id, cur);
+  };
   Object.entries(studyLog || {}).forEach(([subject, byIndex]) => {
     const id = resolveSubjectCode(subject) || subject;
-    Object.entries(byIndex || {}).forEach(([index, item]) => {
-      if (!item) return;
-      map.set(`${id}:${index}`, { subject: id, correct: !!item.correct });
+    Object.values(byIndex || {}).forEach((item) => {
+      if (item) bump(id, !!item.correct);
     });
   });
-  const rows = Array.isArray(answers) ? answers : [];
-  if (rows.length) {
-    const indexMaps = await questionIndexMaps();
-    const questionMap = await questionsByIds(rows.map((row) => row.question_id));
-    rows.forEach((row) => {
-      const q = questionMap.get(Number(row.question_id)) || {};
-      const subject =
-        resolveSubjectCode(rowSubject(q)) || resolveSubjectCode(row.subjects) || 'unknown';
-      const indexMap = indexMaps.get(subject);
-      const index = indexMap ? indexMap.get(Number(row.question_id)) : undefined;
-      const key = Number.isInteger(index) ? `${subject}:${index}` : `q:${row.question_id}`;
-      map.set(key, { subject, correct: !!row.is_correct });
-    });
-  }
-  const bySubject = new Map();
-  map.forEach((item) => {
-    const cur = bySubject.get(item.subject) || { attempted: 0, correct: 0 };
-    cur.attempted += 1;
-    if (item.correct) cur.correct += 1;
-    bySubject.set(item.subject, cur);
+  if (bySubject.size) return bySubject;
+  (Array.isArray(answers) ? answers : []).forEach((row) => {
+    const id = resolveSubjectCode(row.subjects) || resolveSubjectCode(rowSubject(row));
+    bump(id, !!row.is_correct);
   });
   return bySubject;
 }
 
 async function computeSubjectGrades(studyLog, answers) {
-  const progress = await collectSubjectProgress(studyLog, answers);
-  const maps = await questionIndexMaps();
+  const progress = collectSubjectProgress(studyLog, answers);
+  const counts = cachedQuestionCounts();
   return GRADE_SUBJECTS.map((meta) => {
-    const total = maps.has(meta.id) ? maps.get(meta.id).size : 0;
+    const total = Number(counts[meta.id]) || 0;
     const row = progress.get(meta.id) || { attempted: 0, correct: 0 };
-    const rate = total ? Math.round((row.correct / total) * 100) : 0;
+    const denom = total || row.attempted;
+    const rate = denom ? Math.round((row.correct / denom) * 100) : 0;
     return {
       id: meta.id,
       subjects: meta.id,
@@ -1884,7 +2007,7 @@ async function computeSubjectGrades(studyLog, answers) {
       correct: row.correct,
       rate,
       totalRate: rate,
-      difficulty: gradeDifficulty(rate, total),
+      difficulty: gradeDifficulty(rate, total || row.attempted),
     };
   });
 }
@@ -1918,12 +2041,6 @@ async function syncSubjectGrades(ctx, studyLog, answers, options = {}) {
   const client = studyStatsClient(ctx.accessToken);
   if (!client) return { grades: local, source: 'local', hint };
   try {
-    if (ctx.accessToken) {
-      const claimed = await client.rpc('claim_guest_subject_grades');
-      if (claimed.error && !isMissingWrongNotesFn(claimed.error)) {
-        console.warn('subject_grades claim', claimed.error.message);
-      }
-    }
     let remote = await listSubjectGradesRemote(client);
     if (!remote.length || options.force || gradesScore(local) > gradesScore(remote)) {
       remote = await saveSubjectGradesRemote(client, local);
@@ -2002,53 +2119,40 @@ function idFromSubjectIndex(maps, subject, index) {
   return null;
 }
 
-async function collectWeakAttempts(studyLog, answers) {
+function collectWeakAttempts(studyLog, answers) {
   const map = new Map();
-  const maps = await questionIndexMaps();
   Object.entries(studyLog || {}).forEach(([subject, byIndex]) => {
     const id = resolveSubjectCode(subject) || subject;
     Object.entries(byIndex || {}).forEach(([index, item]) => {
       if (!item) return;
-      const questionId = Number(item.questionId) || idFromSubjectIndex(maps, id, index);
-      map.set(`${id}:${index}`, {
+      const qid = Number(item.questionId);
+      const key = Number.isFinite(qid) && qid > 0 ? `q:${qid}` : `${id}:${index}`;
+      map.set(key, {
         subject: id,
         index: Number(index),
         correct: !!item.correct,
-        questionId: Number.isFinite(questionId) && questionId > 0 ? questionId : null,
+        questionId: Number.isFinite(qid) && qid > 0 ? qid : null,
         topic: String(item.topic || '').trim(),
       });
     });
   });
-  const rows = Array.isArray(answers) ? answers : [];
-  if (rows.length) {
-    rows.forEach((row) => {
-      const qid = Number(row.question_id);
-      let subject = resolveSubjectCode(row.subjects);
-      let index;
-      maps.forEach((indexById, code) => {
-        if (Number.isInteger(index)) return;
-        const found = indexById.get(qid);
-        if (Number.isInteger(found)) {
-          subject = subject || code;
-          index = found;
-        }
-      });
-      const key = Number.isInteger(index) ? `${subject}:${index}` : `q:${qid}`;
-      map.set(key, {
-        subject: subject || 'unknown',
-        index: Number.isInteger(index) ? index : -1,
-        correct: !!row.is_correct,
-        questionId: Number.isFinite(qid) && qid > 0 ? qid : null,
-        topic: '',
-      });
+  if (map.size) return [...map.values()];
+  (Array.isArray(answers) ? answers : []).forEach((row) => {
+    const qid = Number(row.question_id);
+    const subject =
+      resolveSubjectCode(row.subjects) ||
+      resolveSubjectCode(rowSubject(row)) ||
+      'unknown';
+    const key = Number.isFinite(qid) && qid > 0 ? `q:${qid}` : `${subject}:${map.size}`;
+    map.set(key, {
+      subject,
+      index: -1,
+      correct: !!row.is_correct,
+      questionId: Number.isFinite(qid) && qid > 0 ? qid : null,
+      topic: String(row.type || row.topic || '').trim(),
     });
-  }
-  const questionMap = await questionsByIds([...map.values()].map((item) => item.questionId));
-  return [...map.values()].map((item) => {
-    const q = item.questionId ? questionMap.get(item.questionId) : null;
-    const topic = String((q && (q.type || q.topic)) || item.topic || '').trim();
-    return { ...item, topic };
   });
+  return [...map.values()];
 }
 
 function buildWeaknessReports(attempts) {
@@ -2178,7 +2282,7 @@ function weaknessScore(rows) {
 }
 
 async function computeWeakness(studyLog, answers) {
-  const attempts = await collectWeakAttempts(studyLog, answers);
+  const attempts = collectWeakAttempts(studyLog, answers);
   return buildWeaknessReports(attempts);
 }
 
@@ -2219,12 +2323,6 @@ async function syncWeakness(ctx, studyLog, answers, options = {}) {
   const client = studyStatsClient(ctx.accessToken);
   if (!client) return { weakness: local, source: 'local', hint };
   try {
-    if (ctx.accessToken) {
-      const claimed = await client.rpc('claim_guest_weakness');
-      if (claimed.error && !isMissingWrongNotesFn(claimed.error)) {
-        console.warn('weakness claim', claimed.error.message);
-      }
-    }
     let remote = await listWeaknessRemote(client);
     if (!remote.length || options.force || weaknessScore(local) > weaknessScore(remote)) {
       remote = await saveWeaknessRemote(client, local);
@@ -2241,6 +2339,10 @@ async function syncWeakness(ctx, studyLog, answers, options = {}) {
 }
 
 async function questionIndexMaps() {
+  const now = Date.now();
+  if (questionIndexCache.maps && now - questionIndexCache.at < QUESTION_INDEX_TTL_MS) {
+    return questionIndexCache.maps;
+  }
   const cfg = supabaseConfig();
   if (!cfg) return new Map();
   const supabase = makeSupabase(cfg);
@@ -2255,11 +2357,14 @@ async function questionIndexMaps() {
     bySubject.get(code).push(Number(row.id));
   });
   const maps = new Map();
+  const counts = {};
   bySubject.forEach((ids, code) => {
     const indexById = new Map();
     ids.forEach((id, i) => indexById.set(id, i));
     maps.set(code, indexById);
+    counts[code] = ids.length;
   });
+  questionIndexCache = { at: now, maps, counts };
   return maps;
 }
 
@@ -2340,8 +2445,21 @@ function isMissingWrongNotesFn(error) {
 
 async function mapWrongNoteRows(rows) {
   const list = Array.isArray(rows) ? rows : [];
-  const indexMaps = await questionIndexMaps();
-  const questionMap = await questionsByIds(list.map((row) => row.question_id));
+  const needsLookup = list.some((row) => {
+    const storedIndex = Number(row.question_index);
+    const note = String(row.note || '').trim();
+    const topic = String(row.topic || '').trim();
+    const joined =
+      row.questions && typeof row.questions === 'object' && !Array.isArray(row.questions)
+        ? row.questions
+        : Array.isArray(row.questions)
+          ? row.questions[0]
+          : null;
+    const qText = String((joined && (joined.question || joined.q)) || '').trim();
+    return !Number.isInteger(storedIndex) || !(note || qText) || !topic;
+  });
+  const indexMaps = needsLookup ? await questionIndexMaps() : null;
+  const questionMap = needsLookup ? await questionsByIds(list.map((row) => row.question_id)) : null;
   return list.map((row) => mapWrongNoteRow(row, indexMaps, questionMap));
 }
 
@@ -2547,12 +2665,6 @@ async function loadWrongNotes(ctx) {
     return { notes: local(), source: 'local', hint };
   }
   try {
-    if (ctx.accessToken) {
-      const claimed = await client.rpc('claim_guest_wrong_notes');
-      if (claimed.error && !isMissingWrongNotesFn(claimed.error)) {
-        console.warn('wrong_notes claim', claimed.error.message);
-      }
-    }
     await migrateLocalWrongNotes(client);
     const notes = await listWrongNotesRemote(client);
     return { notes, source: 'supabase' };
@@ -2677,7 +2789,9 @@ async function authSignInOrSignUp({ email, password, name, metadata, allowFallba
 }
 
 async function completeSocialLogin(res, profile) {
-  const name = profile.name || (profile.provider === 'kakao' ? '카카오 사용자' : '네이버 사용자');
+  const name =
+    profile.name ||
+    (profile.provider === 'kakao' ? '카카오 사용자' : profile.provider === 'google' ? '구글 사용자' : '네이버 사용자');
   const metadata = {
     provider: profile.provider,
     provider_id: String(profile.providerId),
@@ -2711,9 +2825,20 @@ async function signOutAuth(accessToken) {
 
 function joinedLabel(iso) {
   const d = iso ? new Date(iso) : null;
-  if (!d || Number.isNaN(d.getTime())) return Store.todayLabel();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+  if (!d || Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Seoul',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(d)
+      .replace(/-/g, '.');
+  } catch {
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+  }
 }
 
 function dateOrNull(value) {
@@ -2727,14 +2852,20 @@ function dateOrNull(value) {
 
 function accountFromProfile(profile, fallback) {
   const base = { ...Store.DEFAULT_ACCOUNT, ...(fallback || {}) };
-  if (!profile || typeof profile !== 'object') return base;
+  const created =
+    (profile && profile.joined_on) ||
+    (fallback && fallback.created_at) ||
+    (profile && profile.created_at) ||
+    '';
+  const joined = joinedLabel(created) || (base.joined === '2024.01.15' ? '' : base.joined);
+  if (!profile || typeof profile !== 'object') return { ...base, joined };
   return {
     ...base,
     name: profile.nickname || profile.name || base.name,
     email: profile.email || base.email,
     goal: profile.target_exam != null ? profile.target_exam : base.goal,
     targetDate: profile.target_date || base.targetDate || '',
-    joined: profile.created_at ? joinedLabel(profile.created_at) : base.joined,
+    joined,
     subjects: Array.isArray(profile.subjects) ? profile.subjects : base.subjects,
     dailyTarget: Number(profile.daily_target) > 0 ? Number(profile.daily_target) : base.dailyTarget,
     notify: { ...base.notify, ...(profile.notify || {}) },
@@ -2773,15 +2904,214 @@ async function syncAuthMetadata(req, { name, email }) {
   return updated.data.user;
 }
 
+function mapNoticeRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    title: row.title || '',
+    content: row.content || '',
+    pinned: !!row.pinned,
+    author_id: row.author_id || null,
+    author_name: row.author_name || '',
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function noticeFail(error, fallback) {
+  const msg = String((error && error.message) || '');
+  const err = new Error(fallback || '공지 요청에 실패했습니다.');
+  if (/does not exist|schema cache|could not find the table|PGRST205|relation .*notices/i.test(msg)) {
+    err.message = '공지사항 테이블이 없습니다. supabase-notices.sql을 실행해 주세요.';
+    err.status = 503;
+    err.hint = 'Supabase SQL 편집기에서 supabase-notices.sql 파일을 실행해 주세요.';
+    return err;
+  }
+  if (FREE_PERIOD && /permission denied/i.test(msg) && /select|table notices/i.test(msg)) {
+    err.message = '비회원 공지 읽기 권한이 없습니다. supabase-free-period.sql을 실행해 주세요.';
+    err.status = 503;
+    err.hint = 'Supabase SQL 편집기에서 supabase-free-period.sql 파일을 실행해 주세요.';
+    return err;
+  }
+  if (/row-level security|permission denied|42501/i.test(msg)) {
+    err.message = '관리자만 공지를 작성·수정·삭제할 수 있습니다.';
+    err.status = 403;
+    return err;
+  }
+  if (msg) err.message = msg;
+  err.status = (error && error.status) || 400;
+  return err;
+}
+
+async function isNoticeAdmin(ctx) {
+  if (!ctx || !ctx.user || !ctx.accessToken || !ctx.user.id) return false;
+  const supabase = makeUserSupabase(ctx.accessToken);
+  if (!supabase) return false;
+  const { data, error } = await supabase.from('profiles').select('is_admin').eq('id', ctx.user.id).maybeSingle();
+  if (error) return false;
+  return !!(data && data.is_admin);
+}
+
+function noticesClient(ctx) {
+  const token = ctx && ctx.accessToken;
+  const supabase = token ? makeUserSupabase(token) : null;
+  if (!supabase) {
+    const err = new Error('공지사항을 불러오지 못했습니다.');
+    err.status = 503;
+    err.hint = 'Supabase 설정이 필요합니다.';
+    throw err;
+  }
+  return supabase;
+}
+
+async function listNoticesFromSupabase(ctx) {
+  const supabase = noticesClient(ctx);
+  const { data, error } = await supabase
+    .from('notices')
+    .select('*')
+    .order('pinned', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw noticeFail(error, '공지사항을 불러오지 못했습니다.');
+  return (data || []).map(mapNoticeRow).filter(Boolean);
+}
+
+function reportFail(error, fallback) {
+  const msg = String((error && error.message) || '');
+  const err = new Error(fallback || '오류 신고 요청에 실패했습니다.');
+  if (FREE_PERIOD && /permission denied for function|로그인이 필요합니다/i.test(msg)) {
+    err.message = '비회원 오류 신고 권한이 없습니다. supabase-free-period.sql을 실행해 주세요.';
+    err.status = 503;
+    err.hint = 'Supabase SQL 편집기에서 supabase-free-period.sql 파일을 실행해 주세요.';
+    return err;
+  }
+  if (/does not exist|schema cache|could not find the table|PGRST205|function .*report|relation .*reports/i.test(msg)) {
+    err.message = '오류 신고 테이블이 없습니다. supabase-reports.sql을 실행해 주세요.';
+    err.status = 503;
+    err.hint = 'Supabase SQL 편집기에서 supabase-reports.sql 파일을 실행해 주세요.';
+    return err;
+  }
+  if (msg) err.message = msg;
+  err.status = /관리자만|비밀번호/.test(msg) ? 403 : (error && error.status) || 400;
+  return err;
+}
+
+function mapReportSummary(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: row.id,
+    title: row.title || '',
+    created_at: row.created_at,
+    has_answer: !!row.has_answer,
+  };
+}
+
+function mapReportDetail(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    ...mapReportSummary(row),
+    content: row.content || '',
+    author_name: row.author_name || '',
+    answer: row.answer || '',
+    answered_at: row.answered_at || null,
+    updated_at: row.updated_at,
+  };
+}
+
+async function callReportRpc(ctx, name, args) {
+  const supabase = noticesClient(ctx);
+  const { data, error } = await supabase.rpc(name, args || {});
+  if (error) throw reportFail(error, '오류 신고 요청에 실패했습니다.');
+  return data;
+}
+
+function legalFail(error, fallback) {
+  const msg = String((error && error.message) || '');
+  const err = new Error(fallback || '약관을 불러오지 못했습니다.');
+  if (/does not exist|schema cache|could not find the table|PGRST205|relation .*legal_pages/i.test(msg)) {
+    err.message = '약관 테이블이 없습니다. supabase-legal.sql을 실행해 주세요.';
+    err.status = 503;
+    err.hint = 'Supabase SQL 편집기에서 supabase-legal.sql 파일을 실행해 주세요.';
+    return err;
+  }
+  if (msg) err.message = msg;
+  err.status = (error && error.status) || 400;
+  return err;
+}
+
+function mapLegalPage(row) {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    slug: row.slug,
+    title: row.title || '',
+    lead: row.lead || '',
+    content: row.content || '',
+    sort_order: Number(row.sort_order) || 0,
+    updated_at: row.updated_at || null,
+  };
+}
+
+const LEGAL_SLUGS = new Set(['terms', 'privacy', 'support']);
+
+async function legalClient() {
+  const supabase = makeAnonClient();
+  if (!supabase) {
+    const err = new Error('약관을 불러오지 못했습니다.');
+    err.status = 503;
+    err.hint = 'Supabase 설정이 필요합니다.';
+    throw err;
+  }
+  return supabase;
+}
+
+async function listLegalPages() {
+  const supabase = await legalClient();
+  const { data, error } = await supabase
+    .from('legal_pages')
+    .select('slug,title,lead,content,sort_order,updated_at')
+    .order('sort_order', { ascending: true });
+  if (error) throw legalFail(error, '약관을 불러오지 못했습니다.');
+  return (data || []).map(mapLegalPage).filter(Boolean);
+}
+
+async function getLegalPage(slug) {
+  const key = String(slug || '').toLowerCase();
+  if (!LEGAL_SLUGS.has(key)) return null;
+  const supabase = await legalClient();
+  const { data, error } = await supabase.from('legal_pages').select('slug,title,lead,content,sort_order,updated_at').eq('slug', key).maybeSingle();
+  if (error) throw legalFail(error, '약관을 불러오지 못했습니다.');
+  return mapLegalPage(data);
+}
+
 const server = http.createServer(async (req, res) => {
+  setSecurityHeaders(res);
   const url = decodeURIComponent((req.url || '/').split('?')[0]);
 
   if (req.method === 'OPTIONS') {
     res.statusCode = 204;
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.end();
+  }
+
+  if (url === '/api/legal' && req.method === 'GET') {
+    try {
+      const pages = await listLegalPages();
+      return json(res, 200, { pages });
+    } catch (err) {
+      return json(res, err.status || 400, { error: err.message || '약관을 불러오지 못했습니다.', hint: err.hint });
+    }
+  }
+
+  const legalMatch = url.match(/^\/api\/legal\/([^/]+)$/);
+  if (legalMatch && req.method === 'GET') {
+    try {
+      const page = await getLegalPage(legalMatch[1]);
+      if (!page) return json(res, 404, { error: '항목을 찾을 수 없습니다.' });
+      return json(res, 200, { page });
+    } catch (err) {
+      return json(res, err.status || 400, { error: err.message || '약관을 불러오지 못했습니다.', hint: err.hint });
+    }
   }
 
   if (url === '/api/health' && req.method === 'GET') {
@@ -2885,7 +3215,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/auth/signup' && req.method === 'POST') {
     try {
       const body = JSON.parse((await readBody(req, 20_000)) || '{}');
-      const name = String(body.name || '').trim();
+      const name = sanitizePlainText(body.name, 20);
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
       if (!name || !email.includes('@') || password.length < 6) {
@@ -3142,6 +3472,61 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (url === '/api/auth/google' && req.method === 'GET') {
+    const clientId = envValue('GOOGLE_CLIENT_ID');
+    const clientSecret = envValue('GOOGLE_CLIENT_SECRET');
+    if (!clientId || !clientSecret) return snsErrorRedirect(res, 'google', 'nokey');
+    const redirectUri = envValue('GOOGLE_REDIRECT_URI') || `${requestOrigin(req)}/api/auth/google/callback`;
+    const state = makeOAuthState('google');
+    const authorize = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authorize.searchParams.set('response_type', 'code');
+    authorize.searchParams.set('client_id', clientId);
+    authorize.searchParams.set('redirect_uri', redirectUri);
+    authorize.searchParams.set('scope', 'openid email profile');
+    authorize.searchParams.set('state', state);
+    authorize.searchParams.set('prompt', 'select_account');
+    return redirect(res, authorize.toString());
+  }
+
+  if (url === '/api/auth/google/callback' && req.method === 'GET') {
+    try {
+      const qs = new URL(req.url || '/', 'http://127.0.0.1').searchParams;
+      if (qs.get('error')) return snsErrorRedirect(res, 'google', 'denied');
+      const code = String(qs.get('code') || '');
+      const state = String(qs.get('state') || '');
+      if (!code || !takeOAuthState(state, 'google')) return snsErrorRedirect(res, 'google', 'failed');
+      const clientId = envValue('GOOGLE_CLIENT_ID');
+      const clientSecret = envValue('GOOGLE_CLIENT_SECRET');
+      const redirectUri = envValue('GOOGLE_REDIRECT_URI') || `${requestOrigin(req)}/api/auth/google/callback`;
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          code,
+        }),
+      });
+      const token = await tokenRes.json();
+      if (!tokenRes.ok || !token.access_token) return snsErrorRedirect(res, 'google', 'failed');
+      const meRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token.access_token}` },
+      });
+      const me = await meRes.json();
+      if (!meRes.ok || !me.sub) return snsErrorRedirect(res, 'google', 'failed');
+      return await completeSocialLogin(res, {
+        provider: 'google',
+        providerId: me.sub,
+        name: me.name || me.given_name,
+        email: me.email,
+      });
+    } catch {
+      return snsErrorRedirect(res, 'google', 'failed');
+    }
+  }
+
   if (url === '/api/wrong-notes' && req.method === 'GET') {
     const ctx = await sessionContext(req, res);
     try {
@@ -3260,18 +3645,20 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/study-log' && req.method === 'GET') {
     const ctx = await sessionContext(req, res);
     const answers = await loadUserAnswers(ctx);
-    const log = Store.load().studyLog || {};
-    const synced = await syncStudyStats(ctx, log, answers);
-    const grades = await syncSubjectGrades(ctx, log, answers);
-    const weakness = await syncWeakness(ctx, log, answers);
+    const log = mergeLogWithAnswers(readStudyLogFor(ctx), answers);
+    const [stats, grades, weakness] = await Promise.all([
+      computeStudyStats(log, answers),
+      computeSubjectGrades(log, answers),
+      computeWeakness(log, answers),
+    ]);
+    if (stats && stats.attempted) persistStudySnapshot(ctx, log, answers);
     return json(res, 200, {
       log,
       answers,
-      stats: synced.stats,
-      grades: grades.grades,
-      weakness: weakness.weakness,
-      source: synced.source,
-      hint: synced.hint || grades.hint || weakness.hint,
+      stats,
+      grades,
+      weakness,
+      source: ctx.user ? 'supabase' : 'local',
     });
   }
 
@@ -3281,9 +3668,8 @@ const server = http.createServer(async (req, res) => {
       const subject = String(body.subject || '');
       const index = String(body.index);
       const ctx = await sessionContext(req, res);
-      const store = Store.load();
-      if (!store.studyLog[subject]) store.studyLog[subject] = {};
-      const prev = store.studyLog[subject][index];
+      const existingLog = readStudyLogFor(ctx);
+      const prev = existingLog[subject] && existingLog[subject][index];
       let questionUsage = null;
       try {
         const consumed = await consumeQuestion(ctx, prev);
@@ -3298,14 +3684,14 @@ const server = http.createServer(async (req, res) => {
         }
         throw err;
       }
-      store.studyLog[subject][index] = {
+      const questionId = Number(body.questionId || body.question_id);
+      writeStudyLogEntry(ctx, subject, index, {
         topic: body.topic || '',
         correct: !!body.correct,
         date: new Date().toISOString(),
-      };
-      Store.save(store);
+        questionId: Number.isFinite(questionId) && questionId > 0 ? questionId : null,
+      });
 
-      const questionId = Number(body.questionId || body.question_id);
       if (Number.isFinite(questionId) && questionId > 0) {
         const selected = Number(body.selectedAnswer || body.selected_answer);
         const responseTime = Number(body.responseTime || body.response_time);
@@ -3337,18 +3723,21 @@ const server = http.createServer(async (req, res) => {
       }
 
       const answers = await loadUserAnswers(ctx);
-      const synced = await syncStudyStats(ctx, store.studyLog, answers, { force: true });
-      const grades = await syncSubjectGrades(ctx, store.studyLog, answers, { force: true });
-      const weakness = await syncWeakness(ctx, store.studyLog, answers, { force: true });
+      const log = mergeLogWithAnswers(readStudyLogFor(ctx), answers);
+      const [stats, grades, weakness] = await Promise.all([
+        computeStudyStats(log, answers),
+        computeSubjectGrades(log, answers),
+        computeWeakness(log, answers),
+      ]);
+      persistStudySnapshot(ctx, log, answers);
       return json(res, 200, {
-        log: store.studyLog,
+        log,
         answers,
-        stats: synced.stats,
-        grades: grades.grades,
-        weakness: weakness.weakness,
+        stats,
+        grades,
+        weakness,
         questions: questionUsage,
-        source: synced.source,
-        hint: synced.hint || grades.hint || weakness.hint,
+        source: ctx.user ? 'supabase' : 'local',
       });
     } catch (err) {
       return json(res, err.status || 400, { error: err.message || '저장 실패' });
@@ -3362,7 +3751,14 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { user: null, account: null, plan: effectivePlanId('free'), payments: [], profile: null });
     }
     const store = Store.load();
-    const local = { ...emptyAccountFromUser(user), ...(store.accounts[Store.accountKey(user)] || {}) };
+    const fromUser = emptyAccountFromUser(user);
+    const stored = store.accounts[Store.accountKey(user)] || {};
+    const local = {
+      ...fromUser,
+      ...stored,
+      joined: fromUser.joined || (stored.joined === '2024.01.15' ? '' : stored.joined),
+      created_at: user.created_at || null,
+    };
     local.name = user.name || local.name;
     local.email = user.email || local.email;
     let profile = null;
@@ -3401,14 +3797,19 @@ const server = http.createServer(async (req, res) => {
       if (!user) return json(res, 401, { error: '로그인이 필요합니다.' });
       const store = Store.load();
       const key = Store.accountKey(user);
-      const prev = { ...emptyAccountFromUser(user), ...(store.accounts[key] || {}) };
+      const fromUser = emptyAccountFromUser(user);
+      const prev = { ...fromUser, ...(store.accounts[key] || {}) };
       const next = {
         ...prev,
         ...(body.account || {}),
         notify: { ...prev.notify, ...((body.account && body.account.notify) || {}) },
         email: user.email,
+        joined: fromUser.joined,
+        created_at: user.created_at || null,
       };
-      if (body.account && body.account.name) next.name = String(body.account.name).trim();
+      if (body.account && body.account.name) next.name = sanitizePlainText(body.account.name, 20);
+      next.name = sanitizePlainText(next.name, 20);
+      next.goal = sanitizePlainText(next.goal, 40);
       store.accounts[key] = next;
       Store.save(store);
 
@@ -3419,7 +3820,7 @@ const server = http.createServer(async (req, res) => {
           email: user.email || next.email || null,
           target_exam: next.goal || null,
           target_date: dateOrNull(next.targetDate),
-          plan: store.plan || 'free',
+          plan: 'premium',
           subjects: Array.isArray(next.subjects) ? next.subjects : [],
           daily_target: Number(next.dailyTarget) || 30,
           notify: next.notify,
@@ -3435,7 +3836,7 @@ const server = http.createServer(async (req, res) => {
           p_nickname: next.name || null,
           p_target_exam: next.goal || null,
           p_target_date: dateOrNull(next.targetDate),
-          p_plan: store.plan || 'free',
+          p_plan: 'premium',
         });
       } else {
         return json(res, 401, { error: '로그인이 필요합니다.' });
@@ -3482,7 +3883,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = JSON.parse((await readBody(req, 10_000)) || '{}');
       const store = Store.load();
-      store.plan = normalizePlanId(body.plan);
+      store.plan = 'premium';
       Store.save(store);
       const ctx = await sessionContext(req, res);
       if (ctx.accessToken && ctx.user) {
@@ -3493,7 +3894,7 @@ const server = http.createServer(async (req, res) => {
             nickname: acc.name || ctx.user.name || null,
             target_exam: acc.goal || null,
             target_date: dateOrNull(acc.targetDate),
-            plan: store.plan,
+            plan: 'premium',
           });
         } catch {
           /* profiles 가 없으면 로컬 이용권만 유지 */
@@ -3508,13 +3909,13 @@ const server = http.createServer(async (req, res) => {
             p_nickname: acc.name || (user && user.name) || null,
             p_target_exam: acc.goal || null,
             p_target_date: dateOrNull(acc.targetDate),
-            p_plan: store.plan,
+            p_plan: 'premium',
           });
         } catch {
           /* profiles 가 없으면 로컬 이용권만 유지 */
         }
       }
-      return json(res, 200, { plan: store.plan });
+      return json(res, 200, { plan: 'premium' });
     } catch (err) {
       return json(res, 400, { error: err.message || '저장 실패' });
     }
@@ -3550,6 +3951,18 @@ const server = http.createServer(async (req, res) => {
       try {
         const client = makeUserSupabase(ctx.accessToken);
         if (client) {
+          try {
+            await client.rpc('withdraw_account');
+          } catch {
+            await client
+              .from('profiles')
+              .update({
+                status: '회원탈퇴',
+                email: user.email || undefined,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', user.id);
+          }
           await client.from('user_answers').delete().eq('user_id', user.id);
           await client.from('wrong_notes').delete().eq('user_id', user.id);
           await client.from('study_stats').delete().eq('user_id', user.id);
@@ -3558,17 +3971,23 @@ const server = http.createServer(async (req, res) => {
           await client.from('weak_areas').delete().eq('user_id', user.id);
           await client.from('ai_usage').delete().eq('user_id', user.id);
           await client.from('question_usage').delete().eq('user_id', user.id);
-          await client.from('profiles').delete().eq('id', user.id);
         }
       } catch {
         /* ignore */
       }
       const admin = makeServiceSupabase();
-      if (admin) {
+      if (admin && user.id) {
         try {
-          await admin.auth.admin.deleteUser(user.id);
+          await admin
+            .from('profiles')
+            .update({
+              status: '회원탈퇴',
+              email: user.email || undefined,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user.id);
         } catch {
-          /* service role 이 없으면 auth.users 행은 남습니다 */
+          /* status 컬럼이 없으면 아래 SQL을 실행해야 합니다 */
         }
       }
       await signOutAuth(ctx.accessToken);
@@ -3593,14 +4012,186 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
 
+  const noticeMatch = url.match(/^\/api\/notices(?:\/([^/]+))?$/);
+  if (noticeMatch) {
+    try {
+      const ctx = await sessionContext(req, res);
+      if (!ctx.user) return json(res, 401, { error: '로그인 후 이용하세요' });
+      const noticeId = noticeMatch[1];
+      const admin = await isNoticeAdmin(ctx);
+
+      if (req.method === 'GET' && !noticeId) {
+        const notices = await listNoticesFromSupabase(ctx);
+        return json(res, 200, { notices, admin });
+      }
+
+      if (req.method === 'GET' && noticeId) {
+        const supabase = noticesClient(ctx);
+        const { data, error } = await supabase.from('notices').select('*').eq('id', noticeId).maybeSingle();
+        if (error) throw noticeFail(error, '공지를 불러오지 못했습니다.');
+        const notice = mapNoticeRow(data);
+        if (!notice) return json(res, 404, { error: '공지를 찾을 수 없습니다.' });
+        return json(res, 200, { notice, admin });
+      }
+
+      if (req.method === 'POST' && !noticeId) {
+        if (!admin) return json(res, 403, { error: '관리자만 공지를 작성할 수 있습니다.' });
+        const body = JSON.parse((await readBody(req, 80_000)) || '{}');
+        const title = sanitizePlainText(body.title, 80);
+        const content = sanitizePlainText(body.content, 20000);
+        if (!title || !content) return json(res, 400, { error: '제목과 내용을 입력해 주세요.' });
+        const supabase = noticesClient(ctx);
+        const { data, error } = await supabase
+          .from('notices')
+          .insert({
+            title,
+            content,
+            pinned: !!body.pinned,
+            author_id: ctx.user.id,
+            author_name: sanitizePlainText(ctx.user.name || '', 40),
+          })
+          .select('*')
+          .maybeSingle();
+        if (error) throw noticeFail(error, '공지를 저장하지 못했습니다.');
+        return json(res, 200, {
+          ok: true,
+          notice: mapNoticeRow(data),
+          notices: await listNoticesFromSupabase(ctx),
+          admin: true,
+        });
+      }
+
+      if ((req.method === 'PUT' || req.method === 'PATCH') && noticeId) {
+        if (!admin) return json(res, 403, { error: '관리자만 공지를 수정할 수 있습니다.' });
+        const body = JSON.parse((await readBody(req, 80_000)) || '{}');
+        const patch = { updated_at: new Date().toISOString() };
+        if (body.title != null) patch.title = sanitizePlainText(body.title, 80);
+        if (body.content != null) patch.content = sanitizePlainText(body.content, 20000);
+        if (body.pinned != null) patch.pinned = !!body.pinned;
+        if (body.title != null && !patch.title) return json(res, 400, { error: '제목을 입력해 주세요.' });
+        if (body.content != null && !patch.content) return json(res, 400, { error: '내용을 입력해 주세요.' });
+        const supabase = noticesClient(ctx);
+        const { data, error } = await supabase.from('notices').update(patch).eq('id', noticeId).select('*').maybeSingle();
+        if (error) throw noticeFail(error, '공지를 수정하지 못했습니다.');
+        const notice = mapNoticeRow(data);
+        if (!notice) return json(res, 404, { error: '공지를 찾을 수 없습니다.' });
+        return json(res, 200, {
+          ok: true,
+          notice,
+          notices: await listNoticesFromSupabase(ctx),
+          admin: true,
+        });
+      }
+
+      if (req.method === 'DELETE' && noticeId) {
+        if (!admin) return json(res, 403, { error: '관리자만 공지를 삭제할 수 있습니다.' });
+        const supabase = noticesClient(ctx);
+        const { error } = await supabase.from('notices').delete().eq('id', noticeId);
+        if (error) throw noticeFail(error, '공지를 삭제하지 못했습니다.');
+        return json(res, 200, { ok: true, notices: await listNoticesFromSupabase(ctx), admin: true });
+      }
+
+      return json(res, 405, { error: '허용되지 않은 요청입니다.' });
+    } catch (err) {
+      return json(res, err.status || 400, {
+        error: err.message || '공지 요청에 실패했습니다.',
+        hint: err.hint,
+      });
+    }
+  }
+
+  const reportMatch = url.match(/^\/api\/reports(?:\/([^/]+)(?:\/(open|reply))?)?$/);
+  if (reportMatch) {
+    try {
+      const ctx = await sessionContext(req, res);
+      if (!ctx.user) return json(res, 401, { error: '로그인 후 이용하세요' });
+      const reportId = reportMatch[1];
+      const action = reportMatch[2];
+      const admin = await isNoticeAdmin(ctx);
+
+      if (req.method === 'GET' && !reportId) {
+        const rows = await callReportRpc(ctx, 'list_reports');
+        const reports = (Array.isArray(rows) ? rows : []).map(mapReportSummary).filter(Boolean);
+        return json(res, 200, { reports, admin });
+      }
+
+      if (req.method === 'POST' && !reportId) {
+        const body = JSON.parse((await readBody(req, 80_000)) || '{}');
+        const title = sanitizePlainText(body.title, 80);
+        const content = sanitizePlainText(body.content, 20000);
+        const password = String(body.password || '');
+        if (!title || !content) return json(res, 400, { error: '제목과 내용을 입력해 주세요.' });
+        if (password.length < 4) return json(res, 400, { error: '비밀번호는 4자 이상이어야 합니다.' });
+        const row = await callReportRpc(ctx, 'create_report', {
+          p_title: title,
+          p_content: content,
+          p_password: password,
+        });
+        const list = await callReportRpc(ctx, 'list_reports');
+        return json(res, 200, {
+          ok: true,
+          report: mapReportDetail(row),
+          reports: (Array.isArray(list) ? list : []).map(mapReportSummary).filter(Boolean),
+          admin,
+        });
+      }
+
+      if (req.method === 'POST' && reportId && action === 'open') {
+        const body = JSON.parse((await readBody(req, 20_000)) || '{}');
+        const row = await callReportRpc(ctx, 'open_report', {
+          p_id: Number(reportId),
+          p_password: body.password != null ? String(body.password) : '',
+        });
+        const report = mapReportDetail(row);
+        if (!report) return json(res, 404, { error: '글을 찾을 수 없습니다.' });
+        return json(res, 200, { report, admin });
+      }
+
+      if (req.method === 'POST' && reportId && action === 'reply') {
+        if (!admin) return json(res, 403, { error: '관리자만 답변할 수 있습니다.' });
+        const body = JSON.parse((await readBody(req, 80_000)) || '{}');
+        const answer = sanitizePlainText(body.answer, 20000);
+        if (!answer) return json(res, 400, { error: '답변을 입력해 주세요.' });
+        const row = await callReportRpc(ctx, 'reply_report', { p_id: Number(reportId), p_answer: answer });
+        const list = await callReportRpc(ctx, 'list_reports');
+        return json(res, 200, {
+          ok: true,
+          report: mapReportDetail(row),
+          reports: (Array.isArray(list) ? list : []).map(mapReportSummary).filter(Boolean),
+          admin: true,
+        });
+      }
+
+      if (req.method === 'DELETE' && reportId && !action) {
+        if (!admin) return json(res, 403, { error: '관리자만 삭제할 수 있습니다.' });
+        await callReportRpc(ctx, 'delete_report', { p_id: Number(reportId) });
+        const list = await callReportRpc(ctx, 'list_reports');
+        return json(res, 200, {
+          ok: true,
+          reports: (Array.isArray(list) ? list : []).map(mapReportSummary).filter(Boolean),
+          admin: true,
+        });
+      }
+
+      return json(res, 405, { error: '허용되지 않은 요청입니다.' });
+    } catch (err) {
+      return json(res, err.status || 400, {
+        error: err.message || '오류 신고 요청에 실패했습니다.',
+        hint: err.hint,
+      });
+    }
+  }
+
   if (url === '/api/ai-usage' && req.method === 'GET') {
     const ctx = await sessionContext(req, res);
+    ctx.guestKey = Store.guestId(req, res);
     const loaded = await loadAiUsage(ctx);
     return json(res, 200, loaded);
   }
 
   if (url === '/api/entitlements' && req.method === 'GET') {
     const ctx = await sessionContext(req, res);
+    ctx.guestKey = Store.guestId(req, res);
     const payload = await entitlementsPayload(ctx);
     return json(res, 200, payload);
   }
@@ -3625,6 +4216,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const ctx = await sessionContext(req, res);
+      ctx.guestKey = Store.guestId(req, res);
       const loaded = await loadAiUsage(ctx);
       if (loaded.usage && loaded.usage.limit != null && Number(loaded.usage.remaining) <= 0) {
         return json(res, 429, {
@@ -3682,4 +4274,5 @@ server.listen(PORT, '127.0.0.1', () => {
       ? 'Supabase configuration loaded'
       : 'Supabase configuration missing'
   );
+  questionIndexMaps().catch((err) => console.warn('question index warm', err && err.message));
 });

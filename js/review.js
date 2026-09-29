@@ -100,9 +100,9 @@
         </div>
         <div class="note__actions">
           <button class="btn btn--outline btn--sm" type="button"
-                  data-retry data-subject="${esc(item.subject)}" data-question="${item.index}" data-question-id="${item.questionId || ''}">다시 풀기</button>
+                  data-retry data-subject="${esc(item.subject)}" data-question="${item.index}" data-question-id="${esc(item.questionId || '')}">다시 풀기</button>
           <button class="btn btn--outline btn--sm note__delete" type="button"
-                  data-remove data-subject="${esc(item.subject)}" data-question="${item.index}" data-question-id="${item.questionId || ''}">삭제</button>
+                  data-remove data-subject="${esc(item.subject)}" data-question="${item.index}" data-question-id="${esc(item.questionId || '')}">삭제</button>
         </div>
       </li>`
       )

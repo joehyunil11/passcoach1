@@ -149,6 +149,94 @@
   line-height: 15px;
   text-align: center;
 }
+.topbar__badge[hidden] { display: none !important; }
+
+.notice-pop {
+  position: fixed;
+  z-index: 60;
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+}
+.notice-pop[hidden] { display: none !important; }
+.notice-pop__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.notice-pop__head strong {
+  font-size: 13.5px;
+  font-weight: 800;
+}
+.notice-pop__all {
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.notice-pop__list {
+  max-height: min(420px, 70vh);
+  overflow: auto;
+}
+.notice-pop__empty {
+  padding: 28px 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+.notice-pop__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.notice-pop__item:last-child { border-bottom: 0; }
+.notice-pop__item:hover { background: #f8fbff; }
+.notice-pop__dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+.notice-pop__dot.is-off { background: #d5dbe7; }
+.notice-pop__copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+.notice-pop__title {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: keep-all;
+}
+.notice-pop__meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
 
 /* ===== 레이아웃 ===== */
 .layout {
@@ -276,6 +364,17 @@
 }
 
 .nav__link--quiet { color: #0f172a; font-size: 14.5px; font-weight: 700; }
+
+.nav__guest-hint {
+  margin: 0 10px 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.45;
+}
 
 .sidebar__foot {
   padding-top: 8px;

@@ -69,7 +69,9 @@
     const used = Number(usage.usedPeriod) || 0;
     const limit = Number(usage.limit) || 0;
     const label = usage.periodLabel || '오늘';
-    usageEl.textContent = `사용횟수 ${label} ${used}/${limit}회`;
+    usageEl.textContent = usage.periodKind === 'total'
+      ? `사용횟수 ${used}/${limit}회 (${label})`
+      : `사용횟수 ${label} ${used}/${limit}회`;
   }
 
   async function loadUsage() {
@@ -101,9 +103,38 @@
     $('#askInput').disabled = on;
   }
 
-  function setConnected(on) {
-    keyBtn.textContent = on ? 'ChatGPT 연결됨' : 'ChatGPT 연결';
-    keyBtn.classList.toggle('is-on', on);
+  function setConnected() {}
+
+  function readQuizReturn() {
+    try {
+      return JSON.parse(sessionStorage.getItem('passcoach.quizReturn') || 'null');
+    } catch {
+      return null;
+    }
+  }
+
+  function quizReturnHref(snap) {
+    const query = new URLSearchParams();
+    query.set('subject', snap.subject || 'korean');
+    if (snap.drill === '1') {
+      query.set('drill', '1');
+      if (snap.topic) query.set('topic', snap.topic);
+      if (snap.limit) query.set('limit', String(snap.limit));
+    } else if (snap.set) {
+      query.set('set', String(snap.set));
+    }
+    if (Number.isInteger(snap.q)) query.set('q', String(snap.q));
+    query.set('restore', '1');
+    return `quiz.html?${query.toString()}`;
+  }
+
+  function goBackToQuiz() {
+    const snap = readQuizReturn();
+    if (!snap || !snap.subject) {
+      Shell.showToast('풀고 있던 문제가 없습니다. 문제 풀이 중에 AI 선생님을 열어 주세요.');
+      return;
+    }
+    location.href = quizReturnHref(snap);
   }
 
   function localKey() {
@@ -220,9 +251,10 @@
     const ai = Shell.getEntitlements ? Shell.getEntitlements().ai : null;
     if (ai && ai.limit != null && Number(ai.remaining) <= 0) {
       const label = ai.periodLabel || '오늘';
+      const tail = ai.periodKind === 'total' ? '' : ' 이용권을 확인해 주세요.';
       log.insertAdjacentHTML(
         'beforeend',
-        botBlock(`${label} AI 선생님 이용 횟수 ${ai.limit}회를 모두 사용했습니다. 이용권을 확인해 주세요.`, false, 'is-error')
+        botBlock(`${label} AI 선생님 이용 횟수 ${ai.limit}회를 모두 사용했습니다.${tail}`, false, 'is-error')
       );
       log.lastElementChild.scrollIntoView({ block: 'end', behavior: 'smooth' });
       return;
@@ -251,6 +283,11 @@
         openKeyBox();
       } else {
         pending.textContent = err.message || '답을 가져오지 못했습니다.';
+        const ent = err.status === 429 && Shell.getEntitlements && Shell.getEntitlements();
+        if (ent && ent.ai) {
+          ent.ai = { ...ent.ai, usedPeriod: ent.ai.limit, remaining: 0 };
+          renderUsage(ent.ai);
+        }
       }
     } finally {
       setBusy(false);
@@ -269,7 +306,7 @@
     if (chip) ask(chip.dataset.chip);
   });
 
-  keyBtn.addEventListener('click', openKeyBox);
+  keyBtn.addEventListener('click', goBackToQuiz);
   $('#keyCancel').addEventListener('click', closeKeyBox);
   keyBox.addEventListener('click', (event) => {
     if (event.target === keyBox) closeKeyBox();

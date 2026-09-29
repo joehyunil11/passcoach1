@@ -50,7 +50,7 @@
 .qbar__count {
   margin-left: auto;
   color: var(--text-soft);
-  font-size: 12.5px;
+  font-size: 10.5px;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -338,6 +338,11 @@ body.quiz-adminlaw .qcard__passage,
 body.quiz-adminsci .qcard__passage,
 body.quiz-peducation .qcard__passage {
   font-size: 15.5px;
+}
+
+body.quiz-english .qcard__passage {
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 /* ===== 선택지 ===== */
@@ -807,10 +812,10 @@ body.quiz-peducation .qcard__passage {
 .qnav__period {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   flex: none;
-  margin: 0 0 8px;
-  padding-bottom: 8px;
+  margin: 0 0 6px;
+  padding-bottom: 6px;
   border-bottom: 2px solid #8aa6c8;
 }
 .qnav__period[hidden] { display: none !important; }
@@ -826,7 +831,7 @@ body.quiz-peducation .qcard__passage {
   margin: 0;
   min-width: 0;
   color: var(--text);
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 800;
   line-height: 1.2;
   white-space: nowrap;
@@ -846,8 +851,8 @@ body.quiz-peducation .qcard__passage {
 .qnav__sets {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 4px;
-  max-height: 168px;
+  gap: 3px;
+  max-height: 112px;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 1px;
@@ -855,12 +860,12 @@ body.quiz-peducation .qcard__passage {
 }
 
 .qnav__set {
-  height: 28px;
+  height: 24px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: #fff;
   color: var(--text-soft);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
@@ -906,11 +911,12 @@ body.quiz-peducation .qcard__passage {
 .qnav__grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  align-content: start;
   scrollbar-gutter: stable;
 }
 
@@ -923,16 +929,16 @@ body.quiz-peducation .qcard__passage {
 }
 
 .qnav__grid.is-wide-num .qdot {
-  font-size: 14px;
+  font-size: 12px;
   letter-spacing: -.3px;
 }
 
 .qnav__grid.is-xl-num {
-  gap: 5px;
+  gap: 4px;
 }
 
 .qnav__grid.is-xl-num .qdot {
-  font-size: 13px;
+  font-size: 11px;
   letter-spacing: -.4px;
 }
 
@@ -941,14 +947,15 @@ body.quiz-peducation .qcard__passage {
   place-items: center;
   min-width: 0;
   width: 100%;
-  min-height: 40px;
+  min-height: 32px;
+  height: 32px;
   padding: 0 2px;
-  aspect-ratio: 1;
+  aspect-ratio: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--text-soft);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -1145,7 +1152,7 @@ body.quiz-peducation .qcard__passage {
   .qbar { gap: 7px; padding: 0 12px; }
   .qbar__topic { display: none; }
   .qbar__sep--topic { display: none; }
-  .qbar__count { font-size: 12px; }
+  .qbar__count { font-size: 10.5px; }
   .qtimer { padding: 5px 9px; }
   .qtimer span { font-size: 12px; }
 

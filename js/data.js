@@ -26,8 +26,8 @@ const NAV_GROUPS = {
   ],
   navSecondary: [
     { id: 'billing', label: '이용권/결제', icon: 'card', href: 'billing.html' },
-    { id: 'event', label: '오류 신고', icon: 'gift' },
-    { id: 'notice', label: '공지사항', icon: 'megaphone' },
+    { id: 'event', label: '오류 신고', icon: 'gift', href: 'report.html' },
+    { id: 'notice', label: '공지사항', icon: 'megaphone', href: 'notice.html' },
   ],
   navAccount: [
     { id: 'account', label: '내 계정', icon: 'user', href: 'account.html' },

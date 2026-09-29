@@ -2,15 +2,16 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net data:; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co https://api.openai.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<script src="js/boot.js"></script>
-<script src="js/cloud.js?v=20260921"></script>
+<script src="js/boot.js?v=20260928i"></script>
+<script src="js/cloud.js?v=20260928i"></script>
 <title>로그인 · 공무원 AI</title>
 <meta name="theme-color" content="#2563eb" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
 <link rel="stylesheet" href="css/base.css" />
-<link rel="stylesheet" href="css/shell.css" />
-<link rel="stylesheet" href="css/auth.css" />
+<link rel="stylesheet" href="css/shell.css?v=20260928i" />
+<link rel="stylesheet" href="css/auth.css?v=20260928l" />
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'" />
 <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" /></noscript>
@@ -38,11 +39,14 @@
       <h2 class="auth-sns__title">소셜 네트워크 로그인</h2>
       <p class="auth-sns__sub"><strong>소셜 네트워크</strong>를 통해 간편하게 로그인 하세요.</p>
       <div class="auth-sns__row">
-        <a class="sns-btn sns-btn--kakao" href="/api/auth/kakao" aria-label="카카오 로그인">
+        <a class="sns-btn sns-btn--kakao" href="/api/auth/kakao" aria-label="카카오톡으로 로그인">
           <img src="img/kakao-login.svg" alt="" width="56" height="56" />
         </a>
-        <a class="sns-btn sns-btn--naver" href="/api/auth/naver" aria-label="네이버 로그인">
+        <a class="sns-btn sns-btn--naver" href="/api/auth/naver" aria-label="네이버로 로그인">
           <img src="img/naver-login.svg" alt="" width="56" height="56" />
+        </a>
+        <a class="sns-btn sns-btn--google" href="/api/auth/google" aria-label="구글로 로그인">
+          <img src="img/google-login.svg" alt="" width="56" height="56" />
         </a>
       </div>
     </div>
@@ -79,8 +83,8 @@
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
-<script src="js/shell.js"></script>
-<script src="js/api.js"></script>
-<script src="js/auth.js"></script>
+<script src="js/shell.js?v=20260928m"></script>
+<script src="js/api.js?v=20260928i"></script>
+<script src="js/auth.js?v=20260928k"></script>
 </body>
 </html>

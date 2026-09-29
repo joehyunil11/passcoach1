@@ -5,9 +5,9 @@ const AppApi = (() => {
 
   function handleUnauthorized() {
     const page = location.pathname.split(/[/\\]/).pop() || 'index.html';
-    if (/^(login|signup|find-account|reset-password)\.html/i.test(page)) return;
+    if (/^(login|signup|find-account|reset-password|quiz)\.html/i.test(page)) return;
     if (page === 'index.html' || page === '') {
-      if (typeof Shell !== 'undefined') Shell.showToast('로그인 후 이용하세요');
+      if (typeof Shell !== 'undefined') Shell.showToast('로그인 후 전 메뉴 이용 가능');
       return;
     }
     location.replace('index.html?needLogin=1');

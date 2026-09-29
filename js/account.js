@@ -1,4 +1,4 @@
-/* 마이페이지: 회원 정보 · 학습/알림 설정 · 계정 관리 (서버 저장) */
+/* 마이페이지: 회원 정보 · 학습 설정 · 계정 관리 (서버 저장) */
 
 (() => {
   'use strict';
@@ -27,17 +27,18 @@
   };
 
   const DEFAULT = {
-    name: '홍길동',
-    email: 'hong123@email.com',
-    joined: '2024.01.15',
-    goal: '2024년 12월 시험 합격',
+    name: '',
+    email: '',
+    joined: '',
+    goal: '',
     subjects: [],
     dailyTarget: 30,
     notify: { study: true, review: true, event: false },
   };
+  const DUMMY_JOINED = '2024.01.15';
 
   let account = { ...DEFAULT };
-  let planId = 'free';
+  let planId = 'premium';
   let payments = [];
   let dialogMode = '';
   let signedIn = false;
@@ -48,21 +49,41 @@
   }
 
   function formatDate(iso) {
-    const d = new Date(iso);
+    if (!iso) return '';
+    const d = iso instanceof Date ? iso : new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    const p = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+    try {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Seoul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+        .format(d)
+        .replace(/-/g, '.');
+    } catch {
+      const p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}.${p(d.getMonth() + 1)}.${p(d.getDate())}`;
+    }
+  }
+
+  function realJoined(accountRow, user, profile) {
+    const joined = accountRow && accountRow.joined;
+    if (joined && joined !== DUMMY_JOINED && joined !== '2024-01-15') return joined;
+    return formatDate((user && user.created_at) || (profile && profile.created_at) || '');
   }
 
   function payDates() {
     const last = Array.isArray(payments) && payments[0];
     if (last && last.date) {
-      const paid = formatDate(last.date);
-      const next = new Date(last.date);
+      const paidOn = last.date instanceof Date ? last.date : new Date(last.date);
+      const paid = formatDate(paidOn);
+      if (!paid) return { paid: '-', next: '-' };
+      const next = new Date(paidOn.getTime());
       next.setMonth(next.getMonth() + 1);
-      return { paid, next: formatDate(next.toISOString()) };
+      return { paid, next: formatDate(next) || '-' };
     }
-    return { paid: '2024.06.01', next: '2024.07.01' };
+    return { paid: '-', next: '-' };
   }
 
   function subjectText(ids) {
@@ -88,8 +109,8 @@
     $('#viewJoined').textContent = `가입일: ${account.joined || '-'}`;
     $('#viewPlan').textContent = plan.name;
     $('#viewPaid').textContent = `결제일: ${dates.paid}`;
-    $('#viewNext').textContent = `다음 결제일: ${plan.id === 'free' ? '-' : dates.next}`;
-    $('#viewAmount').textContent = `결제 금액: ${plan.amount}`;
+    $('#viewNext').textContent = `다음 결제일: ${plan.id === 'free' || dates.next === '-' ? '-' : dates.next}`;
+    $('#viewAmount').textContent = `결제 금액: ${dates.paid === '-' ? '-' : plan.amount}`;
     $('#viewGoal').textContent = account.goal || '학습 목표를 입력해 주세요.';
     $('#viewGoal2').textContent = account.goal || '학습 목표를 입력해 주세요.';
     const dateEl = $('#viewTargetDate');
@@ -100,9 +121,6 @@
     $('#viewSubjects').textContent = subjectText(account.subjects || []);
     $('#viewSubjects2').textContent = subjectText(account.subjects || []);
     $('#dailyTarget').value = account.dailyTarget;
-    $('#notifyStudy').checked = account.notify.study;
-    $('#notifyReview').checked = account.notify.review;
-    $('#notifyEvent').checked = account.notify.event;
   }
 
   async function saveAccount() {
@@ -116,6 +134,7 @@
         account = {
           ...account,
           ...data.account,
+          joined: realJoined(data.account, data.user, data.profile) || account.joined,
           notify: { ...account.notify, ...(data.account.notify || {}) },
           subjects: Array.isArray(data.account.subjects) ? data.account.subjects : account.subjects,
         };
@@ -139,10 +158,11 @@
       account = {
         ...DEFAULT,
         ...(data.account || {}),
+        joined: realJoined(data.account, data.user, data.profile),
         notify: { ...DEFAULT.notify, ...((data.account && data.account.notify) || {}) },
         subjects: Array.isArray(data.account && data.account.subjects) ? data.account.subjects : [],
       };
-      planId = data.plan || 'free';
+      planId = data.plan || 'premium';
       payments = Array.isArray(data.payments) ? data.payments : [];
       if (data.hint) Shell.showToast(data.hint);
     } catch {
@@ -153,6 +173,8 @@
   }
 
   function setTab(id) {
+    const panelId = `panel${id[0].toUpperCase()}${id.slice(1)}`;
+    if (!$(`#${panelId}`)) id = 'profile';
     $$('.mypage__tab').forEach((tab) => {
       const on = tab.dataset.tab === id;
       tab.classList.toggle('is-active', on);
@@ -241,9 +263,13 @@
       return;
     }
     if (dialogMode === 'profile') {
-      account.name = $('#editName').value.trim() || account.name;
+      account.name = Shell.stripTags
+        ? Shell.stripTags($('#editName').value).trim().slice(0, 20) || account.name
+        : $('#editName').value.trim() || account.name;
     } else if (dialogMode === 'goal') {
-      account.goal = $('#editGoal').value.trim() || account.goal;
+      account.goal = Shell.stripTags
+        ? Shell.stripTags($('#editGoal').value).trim().slice(0, 40) || account.goal
+        : $('#editGoal').value.trim() || account.goal;
       account.targetDate = ($('#editTargetDate') && $('#editTargetDate').value) || '';
     } else if (dialogMode === 'subjects') {
       account.subjects = $$('input[name="subject"]:checked').map((input) => input.value);
@@ -283,20 +309,8 @@
     Shell.showToast('학습 설정을 프로필에 저장했습니다.');
   });
 
-  ['notifyStudy', 'notifyReview', 'notifyEvent'].forEach((id) => {
-    $(`#${id}`).addEventListener('change', async () => {
-      account.notify = {
-        study: $('#notifyStudy').checked,
-        review: $('#notifyReview').checked,
-        event: $('#notifyEvent').checked,
-      };
-      await saveAccount();
-      Shell.showToast('알림 설정을 프로필에 저장했습니다.');
-    });
-  });
-
   $('#leaveBtn').addEventListener('click', async () => {
-    if (window.confirm('정말 탈퇴할까요? 학습 기록이 함께 지워집니다.')) {
+    if (window.confirm('정말 탈퇴할까요? 다시 로그인할 수 없습니다.')) {
       try {
         await AppApi.post('/api/account/leave');
       } catch {

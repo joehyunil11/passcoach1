@@ -197,13 +197,16 @@
 
   async function boot() {
     await StudyLog.ready();
-    try {
-      const data = await AppApi.getQuestions('korean');
-      if (Array.isArray(data.questions) && data.questions.length && QUESTION_BANK.korean) {
-        QUESTION_BANK.korean.questions = data.questions;
+    const remote = typeof StudyLog !== 'undefined' && StudyLog.weaknessReports ? StudyLog.weaknessReports() : [];
+    if (!(Array.isArray(remote) && remote.length) && QUESTION_BANK.korean && !QUESTION_BANK.korean.questions.length) {
+      try {
+        const data = await AppApi.getQuestions('korean');
+        if (Array.isArray(data.questions) && data.questions.length && QUESTION_BANK.korean) {
+          QUESTION_BANK.korean.questions = data.questions;
+        }
+      } catch {
+        /* 원격 문항이 없어도 학습 기록으로 분석합니다. */
       }
-    } catch {
-      /* 원격 문항이 없어도 학습 기록으로 분석합니다. */
     }
     render();
   }

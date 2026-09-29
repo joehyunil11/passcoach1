@@ -190,6 +190,7 @@
 .card--ai .card__cta { color: var(--primary); }
 .card--ai .card__emoji { background: #bfdbfe; }
 .card--ai:hover { box-shadow: 0 16px 40px rgba(37, 99, 235, .16); }
+.card.is-locked { opacity: .55; }
 
 .card__badge {
   position: absolute;

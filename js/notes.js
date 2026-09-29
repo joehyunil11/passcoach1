@@ -156,33 +156,15 @@ const StudyLog = (() => {
     if (!boot) {
       boot = (async () => {
         try {
-          const onPages = typeof Cloud !== 'undefined' && Cloud.isPages && Cloud.isPages();
-          if (!onPages && typeof AppApi !== 'undefined' && typeof QUESTION_BANK === 'object') {
-            const ids = Object.keys(QUESTION_BANK);
-            await Promise.all(
-              ids.map(async (id) => {
-                try {
-                  const data = await AppApi.getQuestions(id);
-                  if (Array.isArray(data.questions) && data.questions.length) {
-                    QUESTION_BANK[id].questions = data.questions;
-                  }
-                } catch {
-                  /* 과목별 원격 로드 실패 시 로컬 유지 */
-                }
-              })
-            );
-          }
-        } catch {
-          /* 국어 원격 로드 실패 시 빈 목록 유지 */
-        }
-        try {
           const res = await AppApi.get('/api/study-log');
           data = res.log && typeof res.log === 'object' ? res.log : {};
           data = applyAnswers(data, res.answers);
           remoteStats = mapRemoteStats(res.stats);
           remoteGrades = mapRemoteGrades(res.grades);
           remoteWeakness = mapRemoteWeakness(res.weakness);
-        } catch {
+        } catch (err) {
+          boot = null;
+          if (err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')))) return;
           data = {};
           remoteStats = null;
           remoteGrades = null;
@@ -201,23 +183,26 @@ const StudyLog = (() => {
     if (!Array.isArray(answers) || !answers.length) return log || {};
     const next = { ...(log || {}) };
     answers.forEach((row) => {
-      const subject = typeof AppApi !== 'undefined' ? AppApi.resolveSubjectId(row.subjects) : '';
+      const subject = typeof AppApi !== 'undefined' ? AppApi.resolveSubjectId(row.subjects) : row.subjects;
+      if (!subject) return;
       const bank = typeof QUESTION_BANK === 'object' && subject ? QUESTION_BANK[subject] : null;
-      if (!bank || !Array.isArray(bank.questions)) return;
-      const index = bank.questions.findIndex((item) => Number(item.id) === Number(row.question_id));
-      if (index < 0) return;
+      let index = -1;
+      if (bank && Array.isArray(bank.questions)) {
+        index = bank.questions.findIndex((item) => Number(item.id) === Number(row.question_id));
+      }
+      const key = index >= 0 ? String(index) : `id:${row.question_id}`;
       if (!next[subject]) next[subject] = {};
-      next[subject][String(index)] = {
+      next[subject][key] = {
         topic: row.type || '',
         correct: !!row.is_correct,
         date: row.answered_at || new Date().toISOString(),
+        questionId: row.question_id || null,
       };
     });
     return next;
   }
 
   async function record({ subject, index, topic, correct, questionId, selectedAnswer, responseTime }) {
-    await ready();
     if (!data[subject]) data[subject] = {};
     const prev = data[subject][String(index)];
     data[subject][String(index)] = {

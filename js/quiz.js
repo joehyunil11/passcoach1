@@ -65,6 +65,7 @@
   let remaining = 0;
   let timerId;
   let questionShownAt = 0;
+  const QUIZ_RETURN_KEY = 'passcoach.quizReturn';
 
   const KIND_LABELS = ['기출문제', '기출변형', 'AI문제'];
 
@@ -236,6 +237,65 @@
     applyDrillChrome();
   }
 
+  function saveQuizReturn() {
+    if (!questions.length) return;
+    try {
+      sessionStorage.setItem(
+        QUIZ_RETURN_KEY,
+        JSON.stringify({
+          subject: subjectId,
+          set: isExamRun() ? sessionIndex + 1 : 1,
+          q: index,
+          drill: isDrillRequest ? '1' : '',
+          topic: drillTopic,
+          limit: drillLimit,
+          picks,
+          remaining,
+          graded,
+          similarSet,
+          aiBack,
+          aiOpened: Array.from(aiOpened),
+          aiTab,
+        })
+      );
+    } catch (_) {
+      /* ignore quota */
+    }
+  }
+
+  function readQuizReturn() {
+    try {
+      return JSON.parse(sessionStorage.getItem(QUIZ_RETURN_KEY) || 'null');
+    } catch {
+      return null;
+    }
+  }
+
+  function applyQuizReturn() {
+    if (params.get('restore') !== '1') return false;
+    const snap = readQuizReturn();
+    if (!snap || snap.subject !== subjectId) return false;
+    if (Array.isArray(snap.picks) && snap.picks.length === picks.length) picks = snap.picks.slice();
+    if (typeof snap.remaining === 'number' && Number.isFinite(snap.remaining)) {
+      remaining = Math.max(0, Math.floor(snap.remaining));
+    }
+    graded = !!snap.graded;
+    const qi = Number(snap.q);
+    const inRun = (sessionSet && sessionSet.includes(qi)) || (drillSet && drillSet.includes(qi));
+    if (Number.isInteger(qi) && qi >= 0 && qi < total && (inRun || !sessionSet)) index = qi;
+    similarSet = Array.isArray(snap.similarSet) ? snap.similarSet : null;
+    if (Array.isArray(snap.aiBack)) {
+      aiBack.length = 0;
+      snap.aiBack.forEach((item) => aiBack.push(item));
+    }
+    if (Array.isArray(snap.aiOpened)) snap.aiOpened.forEach((i) => aiOpened.add(i));
+    if (snap.aiTab) aiTab = snap.aiTab;
+    const url = new URL(location.href);
+    url.searchParams.delete('restore');
+    history.replaceState(null, '', `${url.pathname}${url.search}`);
+    return true;
+  }
+
   /* ── 렌더링 ─────────────────────────────── */
   function extractImgAlt(html) {
     const match = String(html || '').match(/<img\b[^>]*\balt\s*=\s*["']([^"']*)["']/i);
@@ -336,12 +396,12 @@
 
   function isKoreanQuestionStem(text) {
     const head = String(text || '').trim();
-    if (!head || head.length > 140 || !hasHangul(head)) return false;
+    if (!head || head.length > 280 || !hasHangul(head)) return false;
     if (/\[(?:지문|주어진 문장|주어진 글|사례)\]|【(?:지문|주어진 문장|주어진 글|사례)】/.test(head)) return false;
     const hangul = (head.match(/[\uAC00-\uD7A3]/g) || []).length;
     const latin = (head.match(/[A-Za-z]/g) || []).length;
-    if (latin >= 12 && latin > hangul) return false;
     if (/고르시오|고르면|것은\?|것은\.|가장 적절한|일치하는|일치하지|빈칸|밑줄|어법|제목|목적|주제|순서|위치|흐름|다음 글|다음 대화|다음 사례|다음 설명|주어진|설명으로|옳지 않은|옳은 것/.test(head)) return true;
+    if (latin >= 12 && latin > hangul) return false;
     if (/[?？]$/.test(head)) return true;
     if (/다음과 같다[.。]?$/.test(head)) return true;
     return false;
@@ -429,7 +489,7 @@
 
   function splitAfterKoreanStem(text) {
     const src = String(text || '');
-    const match = src.match(/^([\s\S]{8,140}?(?:(?:고르시오|고르면)\s*[?？.。]?|것(?:은|을)\s*[?？]|[는은을]\s*[?？]|인가\s*[?？]|다음과 같다)[.。]?)\s+/);
+    const match = src.match(/^([\s\S]{8,280}?(?:(?:고르시오|고르면)\s*[?？.。]?|것(?:은|을)\s*[?？]|[는은을]\s*[?？]|인가\s*[?？]|다음과 같다)[.。]?)\s+/);
     if (!match) return null;
     const stem = match[1].trim();
     const rest = src.slice(match[0].length).trim();
@@ -437,9 +497,26 @@
     return { stem, passage: stripLeadingPassageLabel(rest) };
   }
 
+  function splitKoreanStemEnglishPassage(text) {
+    const src = String(text || '').trim();
+    if (!hasHangul(src)) return null;
+    const match = src.match(
+      /^([\s\S]{8,280}?(?:고르시오|고르면|(?:가장 )?적절한 것은|일치하는 것은|일치하지 않는 것은|옳지 않은 것은|틀린 것은|옳은 것은)\s*[?？.。]?)\s+([\s\S]+)$/
+    );
+    if (!match) return null;
+    const stem = match[1].trim();
+    const passage = match[2].trim();
+    if (!hasHangul(stem) || passage.length < 40) return null;
+    if (!/^[A-Z“"‘'(]/.test(passage)) return null;
+    const latin = (passage.match(/[A-Za-z]/g) || []).length;
+    const hangul = (passage.match(/[\uAC00-\uD7A3]/g) || []).length;
+    if (latin < 24 || latin <= hangul) return null;
+    return { stem, passage: stripLeadingPassageLabel(passage) };
+  }
+
   function splitFirstLineStem(text) {
     const src = String(text || '');
-    const match = src.match(/^([^\n]{8,140})\n+([\s\S]+)$/);
+    const match = src.match(/^([^\n]{8,280})\n+([\s\S]+)$/);
     if (!match) return null;
     const stem = match[1].trim();
     const rest = match[2].trim();
@@ -453,6 +530,9 @@
 
     const marked = splitOnPassageMarker(text);
     if (marked) return { ...marked, images };
+
+    const englishPassage = splitKoreanStemEnglishPassage(text);
+    if (englishPassage) return { ...englishPassage, images };
 
     const blocks = text.split(/\n\s*\n/);
     if (blocks.length >= 1) {
@@ -610,7 +690,8 @@
     const raw = String((item && item.image_url) || '').trim();
     if (raw) addResolved(raw);
     historyFallbackSrcs(index).forEach(addResolved);
-    return urls;
+    const safeImg = window.PasscoachXss && PasscoachXss.safeImageUrl;
+    return safeImg ? urls.map((item) => safeImg(item)).filter(Boolean) : urls;
   }
 
   function renderQuestionImage(item, extraSrcs) {
@@ -669,14 +750,59 @@
   }
 
   /* ── AI 해설 패널 ───────────────────────── */
+  /* ①. / ①·②· 처럼 원숫자·구두점만 있는 조각은 다음 문장과 한 줄로 잇는다 */
+  function isCircledFragment(part) {
+    return /^(?:[①②③④⑤](?:\s*[·•．.、,/|~\-]*)?)+$/.test(String(part || '').trim());
+  }
+
+  function mergeCircledFragments(items) {
+    const out = [];
+    let pending = [];
+    items.forEach((item) => {
+      const value = String(item || '').trim();
+      if (!value) return;
+      if (isCircledFragment(value)) {
+        pending.push(value.replace(/\s+/g, ''));
+        return;
+      }
+      if (pending.length) {
+        const head = pending.join('');
+        const joiner = /^[①②③④⑤]/.test(value) ? '' : ' ';
+        out.push(`${head}${joiner}${value}`.replace(/\s+/g, ' ').trim());
+        pending = [];
+        return;
+      }
+      out.push(value);
+    });
+    if (pending.length) out.push(pending.join(''));
+    return out;
+  }
+
   function splitExplainItems(body, numbered = false) {
     const text = String(body || '').trim();
     if (!text) return [];
-    if (numbered) {
-      const items = text.split(/(?=[①②③④⑤]\s*)/).map((part) => part.trim()).filter(Boolean);
-      if (items.length > 1) return items;
+
+    /* ①·②·④는 … 처럼 원숫자만 나열된 뒤 문장이 이어지면 한 줄로 유지 */
+    const flat = text.replace(/\n+/g, '').replace(/\s+/g, ' ').trim();
+    if (
+      /^(?:[①②③④⑤][·•．.、,/|~\-\s]*){2,}[가-힣A-Za-z]/.test(flat) &&
+      !/[.。!！?？]\s*[①②③④⑤]/.test(flat)
+    ) {
+      return [flat];
     }
-    return text.split(/\n+/).map((part) => part.trim()).filter(Boolean);
+
+    let items = text.split(/\n+/).map((part) => part.trim()).filter(Boolean);
+
+    /* 오답분석: 실질 내용이 있는 원숫자 항목만 나눈다 */
+    if (numbered && items.length <= 1) {
+      const byMark = text
+        .split(/(?=[①②③④⑤]\s*(?:[가-힣A-Za-z0-9「『(\["']))/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (byMark.length > 1) items = byMark;
+    }
+
+    return mergeCircledFragments(items);
   }
 
   function parseExplain(text) {
@@ -998,6 +1124,7 @@
     renderVerdict();
     renderNav();
     pinQuizViewport();
+    saveQuizReturn();
 
     try {
       const res = await StudyLog.record({
@@ -1126,6 +1253,7 @@
     index = Math.min(Math.max(next, 0), total - 1);
     renderQuestion();
     resetPanelScrolls();
+    saveQuizReturn();
   }
 
   function jumpSimilar(qi) {
@@ -1426,8 +1554,13 @@
 
   async function boot() {
     $('#questionText').textContent = '문제를 불러오는 중입니다.';
+    if (Shell.whenUser) await Shell.whenUser();
     if (Shell.loadEntitlements) await Shell.loadEntitlements();
     if (isDrillRequest && Shell.canFeature && !Shell.canFeature('weakness')) {
+      if (Shell.getUser && !Shell.getUser()) {
+        location.href = 'index.html?needLogin=1';
+        return;
+      }
       showToast(Shell.upgradeMessage('weakness'));
       location.href = 'billing.html';
       return;
@@ -1459,13 +1592,26 @@
     }
 
     resetRunState();
+    const restored = applyQuizReturn();
     renderQuestion();
-    startTimer();
-    if (drillSet && drillSet.length) {
+    if (graded) {
+      $('#barTimerText').textContent = formatClock(remaining);
+      $('#submitBtn').disabled = true;
+    } else {
+      startTimer();
+    }
+    if (restored) {
+      showToast('풀던 문제로 돌아왔습니다.');
+    } else if (drillSet && drillSet.length) {
       const names = String(drillTopic).split(',').map((part) => part.trim()).filter(Boolean);
       const label = names.length > 1 ? `${names[0]}와 ${names[1]}` : names[0] || drillTopic;
       showToast(`${label} 집중 훈련 ${drillSet.length}문제입니다.`);
     }
+    saveQuizReturn();
+    window.addEventListener('pagehide', saveQuizReturn);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') saveQuizReturn();
+    });
   }
 
   boot();

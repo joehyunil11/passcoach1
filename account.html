@@ -2,11 +2,12 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net data:; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co https://api.openai.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<script src="js/boot.js"></script>
-<script src="js/cloud.js?v=20260921"></script>
+<script src="js/boot.js?v=20260928i"></script>
+<script src="js/cloud.js?v=20260928i"></script>
 <script src="js/data.js"></script>
-<script src="js/shell.js"></script>
+<script src="js/shell.js?v=20260928m"></script>
 <title>내 계정 · 공무원 AI</title>
 <meta name="theme-color" content="#2563eb" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎓</text></svg>" />
@@ -20,7 +21,7 @@
   .main{height:100%;min-width:0;overflow-x:hidden;overflow-y:scroll;scrollbar-gutter:stable}
 </style>
 <link rel="stylesheet" href="css/base.css" />
-<link rel="stylesheet" href="css/shell.css" />
+<link rel="stylesheet" href="css/shell.css?v=20260928i" />
 <link rel="stylesheet" href="css/account.css" />
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" media="print" onload="this.media='all'" />
@@ -41,7 +42,7 @@
   <div class="topbar__auth" id="topbarAuth"></div>
   <button class="topbar__icon" type="button" data-action="알림" aria-label="알림">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V10a6 6 0 1 1 12 0v6l1.5 2.5H4.5L6 16Z" /><path d="M10 19.5a2 2 0 0 0 4 0" /></svg>
-    <span class="topbar__badge">3</span>
+    <span class="topbar__badge" hidden></span>
   </button>
 </header>
 
@@ -91,7 +92,6 @@
       <div class="mypage__tabs" role="tablist" aria-label="계정 메뉴">
         <button class="mypage__tab is-active" type="button" role="tab" data-tab="profile" aria-selected="true" aria-controls="panelProfile">회원 정보</button>
         <button class="mypage__tab" type="button" role="tab" data-tab="study" aria-selected="false" aria-controls="panelStudy">학습 설정</button>
-        <button class="mypage__tab" type="button" role="tab" data-tab="notify" aria-selected="false" aria-controls="panelNotify">알림 설정</button>
         <button class="mypage__tab" type="button" role="tab" data-tab="manage" aria-selected="false" aria-controls="panelManage">계정 관리</button>
       </div>
 
@@ -167,30 +167,6 @@
         </div>
       </div>
 
-      <div class="mypage__panel" id="panelNotify" role="tabpanel" hidden>
-        <article class="row">
-          <div>
-            <p class="row__title">학습 리마인더</p>
-            <p class="row__desc">매일 학습 시간에 알림을 받습니다.</p>
-          </div>
-          <label class="switch"><input type="checkbox" id="notifyStudy" /><span></span></label>
-        </article>
-        <article class="row">
-          <div>
-            <p class="row__title">오답 복습 알림</p>
-            <p class="row__desc">틀린 문제를 다시 풀 타이밍에 알려 드립니다.</p>
-          </div>
-          <label class="switch"><input type="checkbox" id="notifyReview" /><span></span></label>
-        </article>
-        <article class="row">
-          <div>
-            <p class="row__title">이벤트 · 공지 알림</p>
-            <p class="row__desc">이벤트와 공지사항을 받아 봅니다.</p>
-          </div>
-          <label class="switch"><input type="checkbox" id="notifyEvent" /><span></span></label>
-        </article>
-      </div>
-
       <div class="mypage__panel" id="panelManage" role="tabpanel" hidden>
         <article class="row">
           <div>
@@ -231,7 +207,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="js/api.js"></script>
-<script src="js/account.js"></script>
+<script src="js/api.js?v=20260928i"></script>
+<script src="js/account.js?v=20260926"></script>
 </body>
 </html>

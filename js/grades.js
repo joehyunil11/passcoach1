@@ -41,13 +41,14 @@
         id: subject.id,
         title: (row && row.title) || subject.label,
         total: row ? row.total : 0,
+        attempted: row ? row.attempted : 0,
         correct: row ? row.correct : 0,
         rate: row ? row.totalRate : 0,
         difficulty: row ? row.difficulty : 'empty',
       };
     });
 
-    if (!rows.some((row) => row.total)) {
+    if (!rows.some((row) => row.total || row.correct || row.attempted)) {
       $('#gradesBody').innerHTML = `
         <tr><td class="record__empty" colspan="5">아직 표시할 과목 문제가 없습니다.</td></tr>`;
       return;
@@ -59,12 +60,12 @@
         return `
       <tr>
         <td class="record__topic"><a class="record__subject" href="${href}">${esc(row.title)}</a></td>
-        <td class="record__count">${row.total} 문제</td>
+        <td class="record__count">${row.total ? `${row.total} 문제` : `${row.attempted || 0} 문제`}</td>
         <td class="record__count">${row.correct} 문제</td>
-        <td class="record__rate">${row.total ? `${row.rate}%` : '—'}</td>
+        <td class="record__rate">${row.total || row.attempted ? `${row.rate}%` : '—'}</td>
         <td>
-          <span class="bar ${barClass(row.rate, row.total, row.difficulty)}" aria-hidden="true">
-            <span style="width:${row.total ? row.rate : 0}%"></span>
+          <span class="bar ${barClass(row.rate, row.total || row.attempted, row.difficulty)}" aria-hidden="true">
+            <span style="width:${row.total || row.attempted ? row.rate : 0}%"></span>
           </span>
         </td>
       </tr>`;

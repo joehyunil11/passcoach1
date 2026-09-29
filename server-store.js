@@ -7,10 +7,10 @@ const crypto = require('crypto');
 const STORE_PATH = path.join(__dirname, 'data', 'app-store.json');
 
 const DEFAULT_ACCOUNT = {
-  name: '홍길동',
-  email: 'hong123@email.com',
-  joined: '2024.01.15',
-  goal: '2024년 12월 시험 합격',
+  name: '',
+  email: '',
+  joined: '',
+  goal: '',
   targetDate: '',
   subjects: [],
   dailyTarget: 30,
@@ -22,7 +22,7 @@ function emptyStore() {
     users: [],
     sessions: {},
     accounts: {},
-    plan: 'free',
+    plan: 'premium',
     payments: [],
     wrongNotes: [],
     studyLog: {},
@@ -115,6 +115,14 @@ function clearAuthCookies(res) {
   clearSessionCookie(res);
 }
 
+function guestId(req, res) {
+  const current = parseCookies(req).passcoach_guest || '';
+  if (/^[a-f0-9]{32,64}$/.test(current)) return current;
+  const next = crypto.randomBytes(16).toString('hex');
+  if (res) appendSetCookie(res, cookieString('passcoach_guest', next, 60 * 60 * 24 * 365));
+  return next;
+}
+
 function currentUser(req) {
   const store = load();
   const cookies = parseCookies(req);
@@ -137,6 +145,7 @@ module.exports = {
   setAuthCookies,
   clearSessionCookie,
   clearAuthCookies,
+  guestId,
   currentUser,
   accountKey,
   DEFAULT_ACCOUNT,

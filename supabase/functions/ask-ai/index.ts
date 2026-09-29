@@ -10,6 +10,25 @@ const SYSTEM = `당신은 대한민국 9급 공무원 시험(국어, 영어, 한
 - 사실이 불확실하면 추측하지 말고 모른다고 말한 뒤, 확인해야 할 법령·연도·개념을 알려 주세요.
 - 핵심만 간결하게, 수험생이 바로 외울 수 있게 쓰세요.`;
 
+/* 로그인 회원은 서버·프로필에서 프리미엄 한도를 적용합니다. 비회원 100회 한도는 쓰지 않습니다. */
+const SUPABASE_URL = String(Deno.env.get('SUPABASE_URL') || '').trim();
+const ANON_KEY = String(Deno.env.get('SUPABASE_ANON_KEY') || '').trim();
+
+async function requestUserId(req: Request) {
+  const token = String(req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token || token === ANON_KEY || !SUPABASE_URL) return '';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { apikey: ANON_KEY || token, Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return '';
+    const user = await res.json().catch(() => null);
+    return user && user.id ? String(user.id) : '';
+  } catch {
+    return '';
+  }
+}
+
 function json(status: number, payload: Record<string, unknown>) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -54,6 +73,17 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const body = await req.json().catch(() => ({}));
+    const token = String(req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    const userId = await requestUserId(req);
+    if (!userId && token !== ANON_KEY) {
+      return json(401, { error: '로그인 후 이용하세요' });
+    }
+
+    if (body.action === 'usage') {
+      return json(200, { usage: { used: 0, limit: 1000, remaining: 1000 } });
+    }
+
     const key = String(Deno.env.get('OPENAI_API_KEY') || '').trim();
     if (!key) {
       return json(503, {
@@ -62,7 +92,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    const body = await req.json().catch(() => ({}));
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const clean = messages
       .filter((item: { role?: string; content?: string }) =>
